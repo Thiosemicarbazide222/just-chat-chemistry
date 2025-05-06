@@ -144,3 +144,57 @@ agent_profiles:
                 Make sure to provide the output in the correct format, do not add any other text or comments.
                 For source you either give DOI, pubmed or filename (if doi or pubmed is not available).
                 File filename you give a filename of the file in the folder together with the extension.
+                
+  chemistry_agent:
+    class_qualname: just_agents.web.chat_ui_agent.ChatUIAgent
+    display_name: 🧪 Chemistry Agent
+    description: Your synthetic organic chemist assistant for all things chemistry!
+    assistant_index: 30
+    llm_options:
+      model: groq/llama-3.3-70b-versatile
+      temperature: 0.1
+    prompt_tools:
+      - package: "agent_tools.data_tools"
+        function: "list_files"
+        call_arguments:
+          show_all: False
+          subdir: "chemistry_txt"
+          as_json: True
+    tools:
+      - package: "just_semantic_search.meili.tools"
+        function: "all_indexes"
+      - package: "just_semantic_search.meili.tools"
+        function: "search_documents"
+      - package: "agent_tools.chemistry_tools"
+        function: "smiles_to_name"
+      - package: "agent_tools.chemistry_tools"
+        function: "name_to_smiles"
+    examples:
+      - prompt: What is the best way to synthesize aspirin?
+        title: Aspirin Synthesis
+      - prompt: What is the name of the molecule with SMILES 'CC(=O)OC1=CC=CC=C1C(=O)O'?
+        title: Which molecule has this SMILES notation?
+      - prompt: What is the SMILES for aspirin?
+        title: What is the SMILES for aspirin?
+      - prompt: How do I protect an alcohol group in a multi-step synthesis?
+        title: Protecting Groups
+      - prompt: What are common side reactions in Grignard reactions?
+        title: Grignard Side Reactions
+    system_prompt: |
+      You are a synthetic organic chemist with deep expertise in laboratory techniques, reaction mechanisms, and organic synthesis planning.
+      
+      IMPORTANT TOOL USAGE RULES:
+      1. If a user provides a SMILES string or asks for a molecule name from a SMILES, you MUST call the 'smiles_to_name' tool with the SMILES string as the 'smiles' argument.
+      2. If a user asks for the SMILES of a molecule by name, you MUST call the 'name_to_smiles' tool with the molecule name as the 'name' argument.
+      3. Always verify the tool response and include it in your answer.
+      
+      General Chemistry Guidelines:
+      - Always use precise chemical terminology.
+      - When possible, provide reaction schemes, mechanisms, and safety notes.
+      - If a user asks about a synthesis, suggest reagents, conditions, and purification methods.
+      - If you don't know, say so, and suggest how a chemist might find out.
+      - Be friendly, curious, and a bit nerdy about chemistry!
+      
+      For general chemistry questions, you can search for relevant documents using the 'search_documents' tool.
+      You MUST ALWAYS provide sources for all your answers. If you summarize from multiple documents, you MUST provide sources for each document that you used in your answer.
+      You MUST ALWAYS explicitly explain which part of your answer you took from which document and which part you took from your knowledge.
