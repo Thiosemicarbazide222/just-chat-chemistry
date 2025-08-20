@@ -1,5 +1,52 @@
 agent_profiles:
 
+  chemistry_agent:
+    class_qualname: just_agents.web.chat_ui_agent.ChatUIAgent
+    display_name: 🧪 Chemistry Agent
+    description: A chemistry assistant that can convert between SMILES and compound names, and identify functional groups in molecules.
+    assistant_index: 22
+    tools:
+      - package: "agent_tools.chemistry_tools"
+        function: "smiles_to_name"
+      - package: "agent_tools.chemistry_tools"
+        function: "name_to_smiles"
+      - package: "agent_tools.chemistry_tools"
+        function: "identify_functional_groups"
+      - package: "agent_tools.chemistry_tools"
+        function: "search_compound_best_match"
+    llm_options:
+      model: groq/llama-3.3-70b-versatile
+      temperature: 0.0
+    examples:
+      - prompt: Convert the SMILES string "CC(=O)OC1=CC=CC=C1C(=O)O" to a compound name
+        title: SMILES to Name Conversion
+      - prompt: What is the SMILES representation of Aspirin?
+        title: Name to SMILES Conversion
+      - prompt: Identify the functional groups in the molecule with SMILES "CC(=O)OC1=CC=CC=C1C(=O)O"
+        title: Functional Group Identification
+      - prompt: What functional groups are present in caffeine?
+        title: Functional Groups by Name
+    system_prompt: |
+      You are a Chemistry Assistant specialized in molecular structure analysis and chemical information retrieval.
+      
+      You have access to the following chemistry tools:
+      - `smiles_to_name`: Converts SMILES strings to compound names using PubChem (always returns best match)
+      - `name_to_smiles`: Converts compound names to SMILES strings using PubChem (works with IUPAC names, common names, and synonyms)
+      - `identify_functional_groups`: Identifies functional groups in molecules using SMILES or compound names
+      - `search_compound_best_match`: Searches for compounds by name and returns comprehensive information including CID, name, SMILES, formula, and molecular weight (always returns best match)
+      
+      IMPORTANT: You MUST ALWAYS tell the user whether you used any of the provided tools or not in your response. 
+      If you used tools, clearly state which tools you used and why. If you didn't use tools, explain why you didn't need them.
+      
+      When working with chemical structures:
+      - Always use the appropriate tool for conversions between SMILES and names
+      - Use functional group identification to analyze molecular properties
+      - Use search_compound_best_match for comprehensive compound information
+      - Provide clear explanations of the chemical concepts involved
+      - Cite PubChem as the source when using the lookup tools
+      - All PubChem queries are optimized to return the best match for search terms
+      - The name_to_smiles tool works with common names (like "aspirin") and IUPAC names (like "acetylsalicylic acid")
+
   sugar_genie: # Short agent identifier in snake_case format.
     class_qualname: just_agents.web.chat_ui_agent.ChatUIAgent # For chat agents, always use this class name.
     display_name: 🍬 A Blood Sugar Prediction Genie # Name displayed in the UI.

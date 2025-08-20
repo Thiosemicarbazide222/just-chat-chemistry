@@ -1,2 +1,4 @@
 numpy>=2.2
 pandas>=2.2
+requests>=2.31.0
+eliot>=1.14.0
