@@ -101,6 +101,122 @@ def name_to_smiles(name: str) -> str:
 
     return "SMILES not found in PubChem."
 
+def get_physical_properties(compound_input: str, input_type: str = "auto") -> dict:
+    """
+    Retrieve comprehensive physical properties of a compound from PubChem.
+    
+    Args:
+        compound_input: The compound identifier (name, SMILES, or CID)
+        input_type: Type of input - "name", "smiles", "cid", or "auto" (default, tries to detect)
+    
+    Returns:
+        Dictionary containing all available physical properties from PubChem
+    """
+    from urllib.parse import quote
+    import re
+    
+    headers = {"User-Agent": "just-chat-chemistry-tools/1.0"}
+    
+    # Auto-detect input type if not specified
+    if input_type == "auto":
+        if re.match(r'^\d+$', compound_input):
+            input_type = "cid"
+        elif re.match(r'^[A-Za-z0-9()[\]{}@+\-=\\#%$:;.,]+$', compound_input) and any(c in compound_input for c in ['(', ')', '=', '#', '@']):
+            input_type = "smiles"
+        else:
+            input_type = "name"
+    
+    # Get CID first if needed
+    cid = None
+    if input_type == "cid":
+        cid = int(compound_input)
+    elif input_type == "smiles":
+        # Convert SMILES to CID
+        try:
+            url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/{compound_input}/cids/JSON"
+            response = requests.get(url, timeout=10, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            if "IdentifierList" in data and "CID" in data["IdentifierList"]:
+                cid = data["IdentifierList"]["CID"][0]
+        except Exception as e:
+            return {"error": f"Failed to convert SMILES to CID: {e}"}
+    elif input_type == "name":
+        # Convert name to CID
+        try:
+            encoded_name = quote(compound_input.strip())
+            url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{encoded_name}/cids/JSON"
+            response = requests.get(url, timeout=10, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+            if "IdentifierList" in data and "CID" in data["IdentifierList"]:
+                cid = data["IdentifierList"]["CID"][0]
+            elif "InformationList" in data and "Information" in data["InformationList"]:
+                info = data["InformationList"]["Information"][0]
+                if "CID" in info and info["CID"]:
+                    cid = info["CID"][0]
+        except Exception as e:
+            return {"error": f"Failed to convert name to CID: {e}"}
+    
+    if not cid:
+        return {"error": f"Could not find CID for compound: {compound_input}"}
+    
+    # Use properties that are actually available in PubChem API
+    available_properties = [
+        "IUPACName", "Title", "SMILES", "InChI", "InChIKey",
+        "MolecularFormula", "MolecularWeight", "XLogP", "TPSA", "Complexity", "Charge",
+        "HBondDonorCount", "HBondAcceptorCount", "RotatableBondCount", "HeavyAtomCount",
+        "ExactMass", "MonoisotopicMass"
+    ]
+    
+    try:
+        # Make a single request with the available properties
+        properties_str = ",".join(available_properties)
+        url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/property/{properties_str}/JSON"
+        response = requests.get(url, timeout=15, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        
+        if "PropertyTable" in data and "Properties" in data["PropertyTable"]:
+            props = data["PropertyTable"]["Properties"][0]
+            
+            # Organize properties into categories
+            result = {
+                "cid": cid,
+                "compound_info": {},
+                "molecular_properties": {},
+                "spectral_properties": {},
+                "other_properties": {}
+            }
+            
+            # Categorize properties
+            compound_info_keys = ["IUPACName", "Title", "SMILES", "InChI", "InChIKey"]
+            molecular_keys = ["MolecularFormula", "MolecularWeight", "XLogP", "TPSA", "Complexity", "Charge", 
+                            "HBondDonorCount", "HBondAcceptorCount", "RotatableBondCount", "HeavyAtomCount"]
+            spectral_keys = ["ExactMass", "MonoisotopicMass"]
+            
+            # Organize properties into categories
+            for key, value in props.items():
+                if value is not None:
+                    if key in compound_info_keys:
+                        result["compound_info"][key] = value
+                    elif key in molecular_keys:
+                        result["molecular_properties"][key] = value
+                    elif key in spectral_keys:
+                        result["spectral_properties"][key] = value
+                    else:
+                        result["other_properties"][key] = value
+            
+            # Remove empty categories
+            result = {k: v for k, v in result.items() if v}
+            
+            return result
+        else:
+            return {"error": "No property data found in PubChem response"}
+            
+    except Exception as e:
+        return {"error": f"Failed to retrieve physical properties: {e}"}
+
 def search_compound_best_match(search_term: str) -> dict:
     """
     Search for a compound by name and return the best match with comprehensive information.
