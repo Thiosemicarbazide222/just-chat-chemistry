@@ -289,6 +289,79 @@ def identify_functional_groups(smiles: str = None, name: str = None) -> dict:
         except Exception as exc:
             return {"error": f"Failed to identify functional groups: {exc}"}
 
+def similarity_search_3d(smiles: str, threshold: int = 80, max_records: int = 50) -> dict:
+    """
+    Perform 3D similarity search using SMILES and return similar compounds with their names and SMILES.
+    
+    Args:
+        smiles: SMILES string of the query compound
+        threshold: Similarity threshold (0-100, default 80)
+        max_records: Maximum number of results to return (default 50, max 100)
+    
+    Returns:
+        Dictionary containing similar compounds with their CIDs, names, and SMILES
+    """
+    from urllib.parse import quote
+    
+    headers = {"User-Agent": "just-chat-chemistry-tools/1.0"}
+    
+    try:
+        # Step 1: Get CIDs from 3D similarity search
+        encoded_smiles = quote(smiles)
+        similarity_url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/fastsimilarity_3d/smiles/{encoded_smiles}/cids/JSON?Threshold={threshold}&MaxRecords={max_records}"
+        
+        response = requests.get(similarity_url, timeout=300, headers=headers)  # 5 minute timeout
+        response.raise_for_status()
+        data = response.json()
+        
+        if "IdentifierList" not in data or "CID" not in data["IdentifierList"]:
+            return {"error": "No similar compounds found"}
+        
+        cids = data["IdentifierList"]["CID"]
+        
+        if not cids:
+            return {"error": "No similar compounds found"}
+        
+        # Step 2: Get properties for all CIDs
+        cids_str = ",".join(map(str, cids))
+        properties_url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cids_str}/property/SMILES,IUPACName,Title/JSON"
+        
+        prop_response = requests.get(properties_url, timeout=300, headers=headers)  # 5 minute timeout
+        prop_response.raise_for_status()
+        prop_data = prop_response.json()
+        
+        if "PropertyTable" not in prop_data or "Properties" not in prop_data["PropertyTable"]:
+            return {"error": "Failed to retrieve compound properties"}
+        
+        properties = prop_data["PropertyTable"]["Properties"]
+        
+        # Step 3: Organize results
+        results = []
+        for prop in properties:
+            cid = prop.get("CID")
+            smiles_result = prop.get("SMILES")
+            iupac_name = prop.get("IUPACName")
+            title = prop.get("Title")
+            
+            # Prefer Title (common name), fallback to IUPACName
+            name = title or iupac_name or "Unknown"
+            
+            results.append({
+                "cid": cid,
+                "name": name,
+                "smiles": smiles_result
+            })
+        
+        return {
+            "query_smiles": smiles,
+            "threshold": threshold,
+            "total_results": len(results),
+            "results": results
+        }
+        
+    except Exception as e:
+        return {"error": f"Failed to perform 3D similarity search: {e}"}
+
 if __name__ == "__main__":
     # Example: Aspirin SMILES
     smiles = "CC(=O)OC1=CC=CC=C1C(=O)O"

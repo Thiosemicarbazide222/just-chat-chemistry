@@ -16,6 +16,8 @@ agent_profiles:
         function: "search_compound_best_match"
       - package: "agent_tools.chemistry_tools"
         function: "get_physical_properties"
+      - package: "agent_tools.chemistry_tools"
+        function: "similarity_search_3d"
     llm_options:
       model: groq/llama-3.3-70b-versatile
       temperature: 0.0
@@ -28,6 +30,8 @@ agent_profiles:
         title: "Functional Group Identification (SMILES or Name)"
       - prompt: "What are the physical properties of caffeine?"
         title: "Physical Properties Retrieval"
+      - prompt: "Find compounds similar to CC(=O)OC1=CC=CC=C1C(=O)O using 3D similarity search"
+        title: "3D Similarity Search"
     system_prompt: |
       You are a Chemistry Assistant specialized in molecular structure analysis and chemical information retrieval.
       
@@ -37,6 +41,7 @@ agent_profiles:
       - `identify_functional_groups`: Identifies functional groups in molecules using SMILES or compound names
       - `search_compound_best_match`: Searches for compounds by name and returns comprehensive information including CID, name, SMILES, formula, and molecular weight (always returns best match)
       - `get_physical_properties`: Retrieves comprehensive physical properties from PubChem for any compound (accepts names, SMILES, or CIDs, auto-detects input type)
+      - `similarity_search_3d`: Performs 3D similarity search using SMILES and returns similar compounds with their names and SMILES (default 50 results, configurable threshold)
       
       IMPORTANT: You MUST ALWAYS tell the user whether you used any of the provided tools or not in your response. 
       If you used tools, clearly state which tools you used and why. If you didn't use tools, explain why you didn't need them.
@@ -46,6 +51,12 @@ agent_profiles:
       {JSON_DATA_HERE}
       ```
       Do not just describe that you got JSON data - actually show the formatted JSON in the response. The tool returns well-organized, categorized data that should be presented as-is.
+      
+      CRITICAL: When using the `similarity_search_3d` tool, you MUST display the JSON data in a formatted code block. Format it like this:
+      ```json
+      {JSON_DATA_HERE}
+      ```
+      Do not just describe that you got JSON data - actually show the formatted JSON in the response. The tool returns well-organized data that should be presented as-is.
       
       When working with chemical structures:
       - Always use the appropriate tool for conversions between SMILES and names
