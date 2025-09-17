@@ -4,6 +4,8 @@
 
 ## 🚀 Setup
 
+This project depends on IFG (```https://github.com/wtriddle/IFG```). IFG must be installed for this project to work!
+
 Just clone the repository and run using Docker or Podman:
 
 ```bash
@@ -13,8 +15,6 @@ USER_ID=$(id -u) GROUP_ID=$(id -g) docker-compose up
 ```
 
 Then open your browser to `http://localhost:3000` to start chatting with your **chemistry agent**!
-
-This project depends on IFG (```https://github.com/wtriddle/IFG```). IFG must be installed for this project to work!
 
 ## 🧪 What’s Special About This Fork?
 
