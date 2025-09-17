@@ -2,7 +2,7 @@
 
 > 🧪 This is a **chemistry-focused fork** of [just-chat](https://github.com/longevity-genie/just-chat) with domain-specific tools to work with molecular structures, names, and chemical properties using SMILES and PubChem.
 
-## 🚀 Quick Start
+## 🚀 Setup
 
 Just clone the repository and run using Docker or Podman:
 
@@ -13,6 +13,8 @@ USER_ID=$(id -u) GROUP_ID=$(id -g) docker-compose up
 ```
 
 Then open your browser to `http://localhost:3000` to start chatting with your **chemistry agent**!
+
+This project depends on IFG (```https://github.com/wtriddle/IFG```). IFG must be installed for this project to work!
 
 ## 🧪 What’s Special About This Fork?
 
