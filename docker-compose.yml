@@ -20,6 +20,8 @@ services:
       # Agent connectivity for chat UI
       AGENT_HOST: "http://just-chat-agents" # agent host for chat to access
       AGENT_PORT: "8091" # agent port for chat to access
+
+      IFG_PATH: "/app/IFG/ifg"
       
       # Directory configuration
       APP_DIR: "/app"
@@ -67,6 +69,7 @@ services:
       - "./scripts:/app/scripts:z"
       - "./agent_tools:/app/agent_tools:Z"
       - "./chat_agent_profiles.yaml:/app/chat_agent_profiles.yaml:Z"
+      - "../IFG/ifg:/app/IFG/ifg:Z"
     restart: on-failure:3
     command: ["python", "-m", "just_agents.web.run_agent", "run-chat-ui-server-command"]
     #command: "python -m just_semantic_search.server.run_rag_server --workers 1 --agent-profiles /app/chat_agent_profiles.yaml"

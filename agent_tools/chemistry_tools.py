@@ -1,5 +1,7 @@
 import requests
 import eliot
+import os
+import sys
 
 def smiles_to_name(smiles: str) -> str:
     """
@@ -275,7 +277,42 @@ def identify_functional_groups(smiles: str = None, name: str = None) -> dict:
     If name is provided, it is converted to SMILES using name_to_smiles().
     Returns a dictionary of functional groups and their counts.
     """
-    from chem.molecule import Molecule  # IFG import (assumes installed)
+    # Lazy-import IFG and try to auto-resolve its path if missing
+    def _import_molecule():
+        try:
+            from chem.molecule import Molecule  # type: ignore
+            return Molecule
+        except Exception as import_exc:
+            # Try to locate IFG via env var or common local paths
+            candidate_paths = []
+            # Support both IFG_PATH (points to 'ifg' folder) and IFG (repo root or 'ifg' folder)
+            ifg_env = os.environ.get("IFG_PATH") or os.environ.get("IFG")
+            if ifg_env:
+                candidate_paths.append(ifg_env)
+                candidate_paths.append(os.path.join(ifg_env, "ifg"))
+            # Common relative locations (repo root or /app inside container)
+            candidate_paths.extend([
+                os.path.join(os.getcwd(), "external", "IFG", "ifg"),
+                os.path.join(os.path.dirname(__file__), "..", "external", "IFG", "ifg"),
+                os.path.join(os.getcwd(), "..", "IFG", "ifg"),
+                "/app/external/IFG/ifg",
+            ])
+            for path in candidate_paths:
+                try:
+                    norm_path = os.path.abspath(path)
+                    if os.path.isdir(norm_path) and norm_path not in sys.path:
+                        sys.path.insert(0, norm_path)
+                        from chem.molecule import Molecule  # type: ignore
+                        return Molecule
+                except Exception:
+                    continue
+            # If still failing, surface a helpful error
+            raise ImportError(
+                "IFG not found. Set IFG_PATH or IFG to the 'ifg' folder (or repo root) from "
+                "https://github.com/wtriddle/IFG, or place it at ../IFG/ifg or ./external/IFG/ifg."
+            ) from import_exc
+
+    Molecule = _import_molecule()
     with eliot.start_action(action_type="identify_functional_groups", smiles=smiles, name=name):
         if name and not smiles:
             smiles = name_to_smiles(name)
