@@ -2,8 +2,6 @@
 
 > 🧪 This is a **chemistry-focused fork** of [just-chat](https://github.com/longevity-genie/just-chat) with domain-specific tools to work with molecular structures, names, and chemical properties using SMILES and PubChem.
 
----
-
 ## 🚀 Quick Start
 
 Just clone the repository and run using Docker or Podman:
@@ -16,8 +14,6 @@ USER_ID=$(id -u) GROUP_ID=$(id -g) docker-compose up
 
 Then open your browser to `http://localhost:3000` to start chatting with your **chemistry agent**!
 
----
-
 ## 🧪 What’s Special About This Fork?
 
 This version includes a **specialized chemistry agent** with tools that allow:
@@ -29,15 +25,11 @@ This version includes a **specialized chemistry agent** with tools that allow:
 
 Chemistry tools are located in `/agent_tools/chemistry_tools/`, extending the base functionality of `just-chat`.
 
----
-
 ## 🧑‍🔬 Customize Your Agent
 
 1. Edit `chat_agent_profiles.yaml` to configure the chemistry agent’s personality and model.  
 2. Modify or extend chemistry tools in `agent_tools/chemistry_tools/`.  
 3. Add additional models, prompts, or custom logic as needed.
-
----
 
 ## 🔬 Chemistry Tools Included
 
@@ -51,8 +43,6 @@ Chemistry tools are located in `/agent_tools/chemistry_tools/`, extending the ba
 
 Each tool uses public APIs like **PubChem** to ensure accurate and reliable chemistry data.
 
----
-
 ## 💬 Interface & Usage
 
 - ✅ Access the web‑based chat UI at `http://localhost:3000`  
@@ -64,8 +54,6 @@ Each tool uses public APIs like **PubChem** to ensure accurate and reliable chem
 “Get physical properties for benzene”
 ```
 
----
-
 ## ⚙️ Features
 
 - 🚀 One-command startup (`docker compose up` or `podman-compose up`)  
@@ -75,9 +63,7 @@ Each tool uses public APIs like **PubChem** to ensure accurate and reliable chem
 - 📦 Docker/Podman support — no local Python/Node needed  
 - 🔑 API key integration for LLMs (Groq, OpenAI, etc.)  
 - 📚 Semantic document search via MeiliSearch (optional)
-
----
-
+  
 ## 💡 Example Prompts to Try
 
 | Prompt Example                                               | Description                    |
@@ -86,8 +72,6 @@ Each tool uses public APIs like **PubChem** to ensure accurate and reliable chem
 | “Give me the SMILES of aspirin”                              | Name → SMILES                  |
 | “What functional groups are in morphine?”                    | Parses and identifies groups   |
 | “What is the molecular weight and boiling point of acetone?” | Retrieves properties           |
-
----
 
 ## 🔐 API Key Configuration
 
@@ -113,8 +97,6 @@ podman-compose down
 podman-compose up
 ```
 
----
-
 ## 🧠 LLM Support
 
 This project uses [just-agents](https://github.com/longevity-genie/just-agents) to enable nearly any modern LLM via YAML config:
@@ -127,8 +109,6 @@ This project uses [just-agents](https://github.com/longevity-genie/just-agents) 
 - Groq LLMs  
 - Local models via Ollama (optional)
 
----
-
 ## 🔍 Semantic Document Search (Optional)
 
 1. Drop `.md` or `.pdf` chemistry files into `data/chem_docs`  
@@ -137,8 +117,6 @@ This project uses [just-agents](https://github.com/longevity-genie/just-agents) 
 4. Enable semantic search in `chat_agent_profiles.yaml`  
 
 Then your chemistry agent can answer questions based on your lab manuals, papers, or notes.
-
----
 
 ## 🤝 Credits & Acknowledgments
 
@@ -151,8 +129,6 @@ Special thanks to:
 
 [![HEALES](images/heales.jpg)](https://heales.org/)  
 [![IBIMA](images/IBIMA.jpg)](https://ibima.med.uni-rostock.de/)
-
----
 
 ## 🧪 Contributing Chemistry Tools
 
@@ -182,16 +158,12 @@ def run(input: str):
     return f"You entered: {input}"
 ```
 
----
-
 ## 🧼 Tips
 
 - ✅ Pull regularly to keep containers up to date  
 - 🧹 Use `docker compose down` or `podman-compose down` before switching config  
 - 🗃️ Logs are in `logs/` even after shutdown  
 - 💬 Chat history stored in persistent MongoDB
-
----
 
 ## 🧪 Happy Moleculing!
 
