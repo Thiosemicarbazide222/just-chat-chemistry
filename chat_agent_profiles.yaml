@@ -4,12 +4,18 @@ agent_profiles:
     class_qualname: just_agents.web.chat_ui_agent.ChatUIAgent
     display_name: 🧪 Chemistry Agent
     description: A chemistry assistant that can convert between SMILES and compound names, and identify functional groups in molecules.
-    assistant_index: 22
+    assistant_index: 1
     tools:
       - package: "agent_tools.chemistry_tools"
         function: "smiles_to_name"
       - package: "agent_tools.chemistry_tools"
         function: "name_to_smiles"
+      - package: "agent_tools.chemistry_tools"
+        function: "smiles_to_molecular_weight"
+      - package: "agent_tools.chemistry_tools"
+        function: "get_ld50"
+      - package: "agent_tools.chemistry_tools"
+        function: "get_ghs_classification"
       - package: "agent_tools.chemistry_tools"
         function: "identify_functional_groups"
       - package: "agent_tools.chemistry_tools"
@@ -26,6 +32,12 @@ agent_profiles:
         title: SMILES to Name Conversion
       - prompt: What is the SMILES representation of Aspirin?
         title: Name to SMILES Conversion
+      - prompt: Compute the molecular weight for the SMILES string "CC(=O)OC1=CC=CC=C1C(=O)O"
+        title: Molecular Weight from SMILES
+      - prompt: "Find LD50 data for acetone and list any species/route/values"
+        title: LD50 from PubChem
+      - prompt: "Get the GHS classification for acetone (signal word, H-codes, pictograms)"
+        title: GHS Classification from PubChem
       - prompt: "Identify the functional groups in this molecule: CC(=O)OC1=CC=CC=C1C(=O)O"
         title: "Functional Group Identification (SMILES or Name)"
       - prompt: "What are the physical properties of caffeine?"

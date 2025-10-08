@@ -3,6 +3,462 @@ import eliot
 import os
 import sys
 
+def get_ghs_classification(compound_input: str, input_type: str = "auto") -> dict:
+    """
+    Retrieve GHS classification from PubChem PUG-View, including hazard classes, categories,
+    signal word, hazard statements (H-codes), and pictograms.
+
+    Args:
+        compound_input: name, SMILES, or CID
+        input_type: "auto" | "name" | "smiles" | "cid"
+
+    Returns:
+        dict with keys: cid, signal_word, pictograms, hazard_classes, hazard_statements
+        or {"error": ...}
+    """
+    from urllib.parse import quote
+    import re
+
+    headers = {"User-Agent": "just-chat-chemistry-tools/1.0"}
+
+    # Resolve input to CID
+    try:
+        if input_type == "auto":
+            if re.match(r'^\d+$', compound_input):
+                input_type = "cid"
+            elif re.match(r'^[A-Za-z0-9()[\]{}@+\-=\\#%$:;.,]+$', compound_input) and any(c in compound_input for c in ['(', ')', '=', '#', '@']):
+                input_type = "smiles"
+            else:
+                input_type = "name"
+
+        cid = None
+        if input_type == "cid":
+            cid = int(compound_input)
+        elif input_type == "smiles":
+            sm = quote(compound_input.strip())
+            url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/{sm}/cids/JSON"
+            r = requests.get(url, timeout=15, headers=headers)
+            r.raise_for_status()
+            j = r.json()
+            cid = j.get("IdentifierList", {}).get("CID", [None])[0]
+        elif input_type == "name":
+            nm = quote(compound_input.strip())
+            url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{nm}/cids/JSON"
+            r = requests.get(url, timeout=15, headers=headers)
+            r.raise_for_status()
+            j = r.json()
+            if "IdentifierList" in j and "CID" in j["IdentifierList"]:
+                cid = j["IdentifierList"]["CID"][0]
+            elif "InformationList" in j and "Information" in j["InformationList"]:
+                info = j["InformationList"]["Information"][0]
+                if "CID" in info and info["CID"]:
+                    cid = info["CID"][0]
+        if not cid:
+            return {"error": f"Could not resolve CID for input: {compound_input}"}
+    except Exception as e:
+        return {"error": f"Failed to resolve input to CID: {e}"}
+
+    # Fetch PUG-View data
+    try:
+        view_url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug_view/data/compound/{cid}/JSON/"
+        resp = requests.get(view_url, timeout=30, headers=headers)
+        resp.raise_for_status()
+        view = resp.json()
+    except Exception as e:
+        return {"error": f"Failed to fetch PUG-View data: {e}"}
+
+    # Traverse sections helper
+    def iterate_sections(node):
+        if isinstance(node, dict):
+            yield node
+            for key in ("Section", "Children", "Sections"):
+                if key in node and isinstance(node[key], list):
+                    for child in node[key]:
+                        yield from iterate_sections(child)
+        elif isinstance(node, list):
+            for item in node:
+                yield from iterate_sections(item)
+
+    # Collect GHS-related data
+    signal_word = None
+    pictograms = []
+    hazard_classes = []  # items like {class, category}
+    hazard_statements = []  # items like {code, text}
+
+    record = (view or {}).get("Record", {})
+    for sec in iterate_sections(record.get("Section", [])):
+        heading = (sec.get("TOCHeading") or "").lower()
+        if not any(h in heading for h in ["ghs", "globally harmonized", "hazard classification", "hazards", "safety"]):
+            continue
+
+        # Information entries can contain StringWithMarkup with structured content
+        for info in (sec.get("Information") or []):
+            val = info.get("Value") or {}
+            strings = [s.get("String") for s in (val.get("StringWithMarkup") or []) if s.get("String")]
+            # Extract possible external image/data URLs that may include pictograms
+            urls = []
+            if isinstance(val.get("ExternalDataURL"), list):
+                urls.extend([u for u in val.get("ExternalDataURL") if isinstance(u, str)])
+            if isinstance(val.get("URL"), list):
+                urls.extend([u for u in val.get("URL") if isinstance(u, str)])
+            if isinstance(val.get("ExternalDataURL"), str):
+                urls.append(val.get("ExternalDataURL"))
+            if isinstance(val.get("URL"), str):
+                urls.append(val.get("URL"))
+
+            # Try to detect GHS pictogram codes in strings or URLs and capture images
+            detected_codes = []
+            for s in strings:
+                if not s:
+                    continue
+                for m in re.finditer(r"\bGHS0?([1-9])\b", s, flags=re.IGNORECASE):
+                    detected_codes.append(f"GHS0{m.group(1)}")
+                if any(k in s.lower() for k in ["skull", "flame", "exclamation", "corrosion", "gas cylinder", "health hazard", "environment", "exploding bomb"]):
+                    # Keep free-text hint; URL matching below may attach an image
+                    detected_codes.append(s)
+            for u in urls:
+                if not isinstance(u, str):
+                    continue
+                m = re.search(r"(GHS0?[1-9])", u, flags=re.IGNORECASE)
+                if m:
+                    detected_codes.append(m.group(1).upper())
+
+            # If this Information block looks like pictograms, add structured entries
+            info_name = (info.get("Name") or "").lower()
+            looks_like_picto = ("pictogram" in info_name) or any("pictogram" in (s or '').lower() for s in strings)
+            if looks_like_picto or detected_codes or urls:
+                # Map codes to matching URLs when possible
+                used_pairs = set()
+                for code in {c for c in detected_codes if isinstance(c, str) and c.upper().startswith("GHS")}:
+                    matched_url = None
+                    for u in urls:
+                        if isinstance(u, str) and code.lower() in u.lower():
+                            matched_url = u
+                            break
+                    key = (code.upper(), matched_url)
+                    if key in used_pairs:
+                        continue
+                    used_pairs.add(key)
+                    pictograms.append({"code": code.upper(), "image_url": matched_url})
+                # Add any remaining URLs without detected code as generic pictograms
+                for u in urls:
+                    key = (None, u)
+                    if key in used_pairs:
+                        continue
+                    used_pairs.add(key)
+                    if isinstance(u, str):
+                        pictograms.append({"code": None, "image_url": u})
+
+            for s in strings:
+                s_l = s.lower()
+                # Signal word
+                if not signal_word and ("signal word:" in s_l or s_l.startswith("signal word")):
+                    # e.g., "Signal word: Danger"
+                    parts = s.split(":", 1)
+                    if len(parts) == 2:
+                        signal_word = parts[1].strip()
+                    else:
+                        # fallback: last token
+                        signal_word = s.strip().split()[-1]
+
+                # Hazard classes and categories
+                # Example: "Acute toxicity (oral) - Category 3"
+                m = re.search(r"([A-Za-z ].*?\))\s*-\s*Category\s*(\d+[A-Za-z]?)", s)
+                if m:
+                    hazard_classes.append({
+                        "class": m.group(1).strip(),
+                        "category": m.group(2).strip()
+                    })
+
+                # Hazard statements H-codes
+                # Example: "H225: Highly flammable liquid and vapor"
+                hm = re.search(r"\b(H\d{3}[A-Z]?)\b\s*:\s*(.+)$", s)
+                if hm:
+                    hazard_statements.append({
+                        "code": hm.group(1),
+                        "text": hm.group(2).strip()
+                    })
+
+            # Also inspect Name/Description fields for structured tags
+            name = info.get("Name") or ""
+            if name.lower().startswith("signal word") and not signal_word:
+                # Try extract from Description/String if present
+                desc = info.get("Description") or ""
+                if desc:
+                    signal_word = desc.strip()
+
+    # Normalize pictograms: ensure list of dicts with code and image_url, dedupe by (code,url)
+    normalized = []
+    seen = set()
+    for p in pictograms:
+        if isinstance(p, dict):
+            code = p.get("code")
+            url = p.get("image_url")
+        else:
+            code = None
+            url = None
+        key = (code, url)
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append({"code": code, "image_url": url})
+    pictograms = normalized
+
+    # Fallback mapping for standard GHS diamond pictogram images (Wikimedia Commons)
+    code_to_fallback_image = {
+        "GHS01": "https://upload.wikimedia.org/wikipedia/commons/6/6b/GHS-pictogram-explos.svg",
+        "GHS02": "https://upload.wikimedia.org/wikipedia/commons/5/5a/GHS-pictogram-flamme.svg",
+        "GHS03": "https://upload.wikimedia.org/wikipedia/commons/1/19/GHS-pictogram-comburant.svg",
+        "GHS04": "https://upload.wikimedia.org/wikipedia/commons/c/cf/GHS-pictogram-bouteille_a_gaz.svg",
+        "GHS05": "https://upload.wikimedia.org/wikipedia/commons/8/80/GHS-pictogram-corrosion.svg",
+        "GHS06": "https://upload.wikimedia.org/wikipedia/commons/9/90/GHS-pictogram-tete-de-mort.svg",
+        "GHS07": "https://upload.wikimedia.org/wikipedia/commons/3/3b/GHS-pictogram-exclamation.svg",
+        "GHS08": "https://upload.wikimedia.org/wikipedia/commons/2/26/GHS-pictogram-silhouette.svg",
+        "GHS09": "https://upload.wikimedia.org/wikipedia/commons/f/f7/GHS-pictogram-environnement.svg",
+    }
+
+    # Ensure each pictogram with a known code has an image_url
+    for p in pictograms:
+        code = p.get("code")
+        if code and not p.get("image_url"):
+            fallback_url = code_to_fallback_image.get(code.upper())
+            if fallback_url:
+                p["image_url"] = fallback_url
+
+    # Prepare markdown image snippets for easy rendering in UI
+    pictogram_markdown = []
+    for p in pictograms:
+        code = p.get("code") or "GHS"
+        url = p.get("image_url")
+        if url:
+            pictogram_markdown.append(f"![{code}]({url})")
+
+    result = {
+        "cid": cid,
+        "signal_word": signal_word,
+        "pictograms": pictograms,
+        "pictogram_markdown": pictogram_markdown,
+        "hazard_classes": hazard_classes,
+        "hazard_statements": hazard_statements
+    }
+
+    # Provide a helpful message if nothing found
+    if not any([signal_word, pictograms, hazard_classes, hazard_statements]):
+        result["note"] = "No explicit GHS data found in PubChem PUG-View sections."
+    return result
+
+def get_ld50(compound_input: str, input_type: str = "auto") -> dict:
+    """
+    Retrieve LD50 toxicity data for a compound using PubChem PUG-View.
+
+    Args:
+        compound_input: name, SMILES, or CID
+        input_type: one of "auto", "name", "smiles", "cid"
+
+    Returns:
+        dict with keys:
+          - cid: int
+          - ld50_entries: list of parsed LD50 items (species, route, value, units, note, source)
+          - raw_count: number of LD50 mentions found
+        or {"error": ...}
+    """
+    from urllib.parse import quote
+    import re
+
+    headers = {"User-Agent": "just-chat-chemistry-tools/1.0"}
+
+    # Resolve input to CID
+    try:
+        if input_type == "auto":
+            if re.match(r'^\d+$', compound_input):
+                input_type = "cid"
+            elif re.match(r'^[A-Za-z0-9()[\]{}@+\-=\\#%$:;.,]+$', compound_input) and any(c in compound_input for c in ['(', ')', '=', '#', '@']):
+                input_type = "smiles"
+            else:
+                input_type = "name"
+
+        cid = None
+        if input_type == "cid":
+            cid = int(compound_input)
+        elif input_type == "smiles":
+            sm = quote(compound_input.strip())
+            url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/{sm}/cids/JSON"
+            r = requests.get(url, timeout=15, headers=headers)
+            r.raise_for_status()
+            j = r.json()
+            cid = j.get("IdentifierList", {}).get("CID", [None])[0]
+        elif input_type == "name":
+            nm = quote(compound_input.strip())
+            url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{nm}/cids/JSON"
+            r = requests.get(url, timeout=15, headers=headers)
+            r.raise_for_status()
+            j = r.json()
+            if "IdentifierList" in j and "CID" in j["IdentifierList"]:
+                cid = j["IdentifierList"]["CID"][0]
+            elif "InformationList" in j and "Information" in j["InformationList"]:
+                info = j["InformationList"]["Information"][0]
+                if "CID" in info and info["CID"]:
+                    cid = info["CID"][0]
+        if not cid:
+            return {"error": f"Could not resolve CID for input: {compound_input}"}
+    except Exception as e:
+        return {"error": f"Failed to resolve input to CID: {e}"}
+
+    # Fetch PUG-View toxicity sections
+    try:
+        view_url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug_view/data/compound/{cid}/JSON/"
+        resp = requests.get(view_url, timeout=30, headers=headers)
+        resp.raise_for_status()
+        view = resp.json()
+    except Exception as e:
+        return {"error": f"Failed to fetch PUG-View data: {e}"}
+
+    # Helpers to traverse and extract LD50 strings
+    def collect_sections(node):
+        sections = []
+        if isinstance(node, dict):
+            if node.get("TOCHeading") or node.get("TOCHeading", ""):
+                sections.append(node)
+            # Recurse into children lists
+            for key in ("Section", "Children", "Sections"):
+                if key in node and isinstance(node[key], list):
+                    for child in node[key]:
+                        sections.extend(collect_sections(child))
+        elif isinstance(node, list):
+            for item in node:
+                sections.extend(collect_sections(item))
+        return sections
+
+    def extract_information_strings(section):
+        texts = []
+        infos = section.get("Information", []) if isinstance(section, dict) else []
+        for info in infos:
+            val = info.get("Value") if isinstance(info, dict) else None
+            if not val:
+                continue
+            # StringWithMarkup entries
+            for swm in val.get("StringWithMarkup", []) or []:
+                s = swm.get("String")
+                if s:
+                    texts.append({
+                        "text": s,
+                        "reference": (info.get("Reference", [{}])[0].get("Name") if info.get("Reference") else None)
+                    })
+        return texts
+
+    # Identify toxicity-related sections
+    record = (view or {}).get("Record", {})
+    top_sections = record.get("Section", [])
+    all_sections = collect_sections(top_sections)
+
+    candidate_sections = []
+    for sec in all_sections:
+        heading = (sec.get("TOCHeading") or "").lower()
+        if any(h in heading for h in ["toxicity", "toxicological", "safety", "hazards"]):
+            candidate_sections.append(sec)
+
+    # Extract LD50 mentions
+    ld50_texts = []
+    for sec in candidate_sections:
+        ld50_texts.extend(extract_information_strings(sec))
+
+    # Filter for LD50; parse simple patterns like "LD50 Oral rat: 200 mg/kg"
+    ld50_entries = []
+    ld50_pattern = re.compile(r"LD50\s*([^:;\n]*)[:;,-]?\s*([\d,.]+)\s*(mg/kg|g/kg|ug/kg|µg/kg)", re.IGNORECASE)
+    for item in ld50_texts:
+        text = item["text"]
+        if "ld50" not in text.lower():
+            continue
+        # Try to parse one or more values from the text
+        for match in ld50_pattern.finditer(text):
+            context = match.group(1).strip() if match.group(1) else ""
+            value_str = match.group(2).replace(",", "")
+            units = match.group(3)
+            try:
+                value = float(value_str)
+            except Exception:
+                value = None
+            # Heuristics for route/species from context fragment
+            route = None
+            species = None
+            ctx_lower = context.lower()
+            for r in ["oral", "dermal", "intraperitoneal", "intravenous", "inhalation", "subcutaneous"]:
+                if r in ctx_lower:
+                    route = r
+                    break
+            for sp in ["rat", "mouse", "mice", "rabbit", "guinea pig", "dog", "human"]:
+                if sp in ctx_lower:
+                    species = sp
+                    break
+            ld50_entries.append({
+                "text": text,
+                "value": value,
+                "units": units,
+                "route": route,
+                "species": species,
+                "source": item.get("reference")
+            })
+
+        # If no numeric parse, but contains LD50, include as raw
+        if not any(m.group(0) for m in ld50_pattern.finditer(text)):
+            ld50_entries.append({
+                "text": text,
+                "value": None,
+                "units": None,
+                "route": None,
+                "species": None,
+                "source": item.get("reference")
+            })
+
+    # Deduplicate by text
+    seen = set()
+    unique_entries = []
+    for e in ld50_entries:
+        key = e["text"]
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_entries.append(e)
+
+    return {
+        "cid": cid,
+        "raw_count": len(ld50_entries),
+        "ld50_entries": unique_entries
+    }
+
+def smiles_to_molecular_weight(smiles: str):
+    """
+    Compute/lookup the compound molecular weight from a SMILES string via PubChem.
+
+    Returns:
+        - float (molecular weight in g/mol) on success
+        - dict with "error" key on failure
+    """
+    from urllib.parse import quote
+
+    if not smiles or not smiles.strip():
+        return {"error": "No SMILES string provided."}
+
+    headers = {"User-Agent": "just-chat-chemistry-tools/1.0"}
+    try:
+        encoded_smiles = quote(smiles.strip())
+        url = (
+            f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/{encoded_smiles}/"
+            "property/MolecularWeight/JSON"
+        )
+        response = requests.get(url, timeout=10, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        props = data.get("PropertyTable", {}).get("Properties", [])
+        if not props:
+            return {"error": "No property data found in PubChem response"}
+        weight = props[0].get("MolecularWeight")
+        if weight is None:
+            return {"error": "MolecularWeight not found in PubChem response"}
+        return float(weight)
+    except Exception as exc:
+        return {"error": f"Failed to retrieve molecular weight: {exc}"}
+
 def smiles_to_name(smiles: str) -> str:
     """
     Given a SMILES string, query PubChem and return the compound's name.
