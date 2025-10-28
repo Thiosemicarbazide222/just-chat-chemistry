@@ -1,6 +1,6 @@
 # just-chat-chemistry
 
-> 🧪 This is a **chemistry-focused fork** of [just-chat](https://github.com/longevity-genie/just-chat) with domain-specific tools to work with molecular structures, names, and chemical properties using SMILES and PubChem.
+🧪 This is a **chemistry-focused fork** of [just-chat](https://github.com/longevity-genie/just-chat) with domain-specific tools to work with molecular structures, names, and chemical properties using SMILES and PubChem.
 
 ## 🚀 Setup
 
