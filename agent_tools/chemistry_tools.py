@@ -426,6 +426,173 @@ def get_ld50(compound_input: str, input_type: str = "auto") -> dict:
         "ld50_entries": unique_entries
     }
 
+def get_fda_approval(compound_input: str, input_type: str = "auto") -> dict:
+    """
+    Retrieve FDA approval information for a compound via PubChem PUG-View.
+
+    Args:
+        compound_input: name, SMILES, or CID
+        input_type: one of "auto", "name", "smiles", "cid"
+
+    Returns:
+        dict with keys:
+          - cid: int
+          - approved: bool | None
+          - approval_years: list[int]
+          - application_numbers: list[str]  # NDA/ANDA/BLA identifiers
+          - marketing_status: list[str]
+          - evidence: list[ {source, section, text} ]
+        or {"error": ...}
+    """
+    from urllib.parse import quote
+    import re
+
+    headers = {"User-Agent": "just-chat-chemistry-tools/1.0"}
+
+    # Resolve input to CID
+    try:
+        if input_type == "auto":
+            if re.match(r'^\d+$', compound_input):
+                input_type = "cid"
+            elif re.match(r'^[A-Za-z0-9()[\]{}@+\-=\\#%$:;.,]+$', compound_input) and any(c in compound_input for c in ['(', ')', '=', '#', '@']):
+                input_type = "smiles"
+            else:
+                input_type = "name"
+
+        cid = None
+        if input_type == "cid":
+            cid = int(compound_input)
+        elif input_type == "smiles":
+            sm = quote(compound_input.strip())
+            url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/{sm}/cids/JSON"
+            r = requests.get(url, timeout=15, headers=headers)
+            r.raise_for_status()
+            j = r.json()
+            cid = j.get("IdentifierList", {}).get("CID", [None])[0]
+        elif input_type == "name":
+            nm = quote(compound_input.strip())
+            url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{nm}/cids/JSON"
+            r = requests.get(url, timeout=15, headers=headers)
+            r.raise_for_status()
+            j = r.json()
+            if "IdentifierList" in j and "CID" in j["IdentifierList"]:
+                cid = j["IdentifierList"]["CID"][0]
+            elif "InformationList" in j and "Information" in j["InformationList"]:
+                info = j["InformationList"]["Information"][0]
+                if "CID" in info and info["CID"]:
+                    cid = info["CID"][0]
+        if not cid:
+            return {"error": f"Could not resolve CID for input: {compound_input}"}
+    except Exception as e:
+        return {"error": f"Failed to resolve input to CID: {e}"}
+
+    # Fetch PUG-View JSON
+    try:
+        view_url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug_view/data/compound/{cid}/JSON/"
+        resp = requests.get(view_url, timeout=30, headers=headers)
+        resp.raise_for_status()
+        view = resp.json()
+    except Exception as e:
+        return {"error": f"Failed to fetch PUG-View data: {e}"}
+
+    # Traverse all sections recursively
+    def iterate_sections(node):
+        if isinstance(node, dict):
+            yield node
+            for key in ("Section", "Children", "Sections"):
+                if key in node and isinstance(node[key], list):
+                    for child in node[key]:
+                        yield from iterate_sections(child)
+        elif isinstance(node, list):
+            for item in node:
+                yield from iterate_sections(item)
+
+    # Collect FDA-related evidence
+    evidence = []
+    approval_years: list[int] = []
+    application_numbers: list[str] = []
+    marketing_status: list[str] = []
+    approved_signals: int = 0
+    withdrawn_signals: int = 0
+
+    record = (view or {}).get("Record", {})
+    for sec in iterate_sections(record.get("Section", [])):
+        heading = (sec.get("TOCHeading") or "")
+        heading_l = heading.lower()
+        looks_relevant = any(k in heading_l for k in [
+            "fda", "orange book", "drug and medication", "regulatory status", "approval", "drugbank"
+        ])
+        if not looks_relevant:
+            continue
+
+        infos = sec.get("Information", []) or []
+        for info in infos:
+            val = info.get("Value") or {}
+            strings = [s.get("String") for s in (val.get("StringWithMarkup") or []) if s.get("String")]
+            # Include Description as a string if present
+            desc = info.get("Description")
+            if isinstance(desc, str) and desc:
+                strings.append(desc)
+
+            # Extract signals and fields
+            for s in strings:
+                if not isinstance(s, str):
+                    continue
+                s_clean = s.strip()
+                s_l = s_clean.lower()
+                # Approval signals
+                if re.search(r"\b(fda[- ]?approved|approved by fda|us fda approved)\b", s_l):
+                    approved_signals += 1
+                if re.search(r"\bwithdrawn\b", s_l):
+                    withdrawn_signals += 1
+                # Years
+                for ym in re.finditer(r"\b(19|20)\d{2}\b", s_clean):
+                    year = int(ym.group(0))
+                    if year not in approval_years:
+                        approval_years.append(year)
+                # Application numbers NDA/ANDA/BLA
+                for am in re.finditer(r"\b(NDA|ANDA|BLA)\s*\d+\b", s_clean, flags=re.IGNORECASE):
+                    app = am.group(0).upper()
+                    if app not in application_numbers:
+                        application_numbers.append(app)
+                # Marketing status
+                for ms in ["prescription", "otc", "over the counter", "discontinued", "rx-only", "investigational"]:
+                    if ms in s_l and s_clean not in marketing_status:
+                        marketing_status.append(s_clean)
+
+                evidence.append({
+                    "source": (info.get("Reference", [{}])[0].get("Name") if info.get("Reference") else None),
+                    "section": heading,
+                    "text": s_clean,
+                })
+
+    approved: bool | None
+    if approved_signals > 0 and withdrawn_signals == 0:
+        approved = True
+    elif withdrawn_signals > 0 and approved_signals == 0:
+        approved = False
+    elif approved_signals == 0 and withdrawn_signals == 0:
+        # Look for generic cues like DrugBank status lines
+        status_lines = [e["text"].lower() for e in evidence]
+        if any("status" in t and "approved" in t for t in status_lines):
+            approved = True
+        elif any("status" in t and "withdrawn" in t for t in status_lines):
+            approved = False
+        else:
+            approved = None
+    else:
+        # Conflicting signals
+        approved = None
+
+    return {
+        "cid": cid,
+        "approved": approved,
+        "approval_years": sorted(approval_years),
+        "application_numbers": application_numbers,
+        "marketing_status": marketing_status,
+        "evidence": evidence,
+    }
+
 def smiles_to_molecular_weight(smiles: str):
     """
     Compute/lookup the compound molecular weight from a SMILES string via PubChem.
@@ -440,11 +607,186 @@ def smiles_to_molecular_weight(smiles: str):
         return {"error": "No SMILES string provided."}
 
     headers = {"User-Agent": "just-chat-chemistry-tools/1.0"}
+
+    # Average atomic weights (IUPAC standard atomic weights; truncated set covering common elements)
+    ATOMIC_WEIGHTS = {
+        "H": 1.00794,
+        "He": 4.002602,
+        "Li": 6.941,
+        "Be": 9.012182,
+        "B": 10.811,
+        "C": 12.0107,
+        "N": 14.0067,
+        "O": 15.9994,
+        "F": 18.9984032,
+        "Ne": 20.1797,
+        "Na": 22.98976928,
+        "Mg": 24.3050,
+        "Al": 26.9815386,
+        "Si": 28.0855,
+        "P": 30.973762,
+        "S": 32.065,
+        "Cl": 35.453,
+        "Ar": 39.948,
+        "K": 39.0983,
+        "Ca": 40.078,
+        "Sc": 44.955912,
+        "Ti": 47.867,
+        "V": 50.9415,
+        "Cr": 51.9961,
+        "Mn": 54.938045,
+        "Fe": 55.845,
+        "Co": 58.933195,
+        "Ni": 58.6934,
+        "Cu": 63.546,
+        "Zn": 65.38,
+        "Ga": 69.723,
+        "Ge": 72.64,
+        "As": 74.92160,
+        "Se": 78.96,
+        "Br": 79.904,
+        "Kr": 83.798,
+        "Rb": 85.4678,
+        "Sr": 87.62,
+        "Y": 88.90585,
+        "Zr": 91.224,
+        "Nb": 92.90638,
+        "Mo": 95.96,
+        "Tc": 98.0,
+        "Ru": 101.07,
+        "Rh": 102.90550,
+        "Pd": 106.42,
+        "Ag": 107.8682,
+        "Cd": 112.411,
+        "In": 114.818,
+        "Sn": 118.710,
+        "Sb": 121.760,
+        "Te": 127.60,
+        "I": 126.90447,
+        "Xe": 131.293,
+        "Cs": 132.9054519,
+        "Ba": 137.327,
+        "La": 138.90547,
+        "Ce": 140.116,
+        "Pr": 140.90765,
+        "Nd": 144.242,
+        "Sm": 150.36,
+        "Eu": 151.964,
+        "Gd": 157.25,
+        "Tb": 158.92535,
+        "Dy": 162.500,
+        "Ho": 164.93032,
+        "Er": 167.259,
+        "Tm": 168.93421,
+        "Yb": 173.054,
+        "Lu": 174.9668,
+        "Hf": 178.49,
+        "Ta": 180.94788,
+        "W": 183.84,
+        "Re": 186.207,
+        "Os": 190.23,
+        "Ir": 192.217,
+        "Pt": 195.084,
+        "Au": 196.966569,
+        "Hg": 200.59,
+        "Tl": 204.3833,
+        "Pb": 207.2,
+        "Bi": 208.98040,
+        "Po": 209.0,
+        "At": 210.0,
+        "Rn": 222.0,
+    }
+
+    def parse_formula(formula: str) -> dict:
+        """Parse a chemical formula into element counts.
+        Supports parentheses and hydrate separators ('.' or '·').
+        """
+        import re
+
+        def merge_counts(target: dict, source: dict, factor: int = 1) -> None:
+            for k, v in source.items():
+                target[k] = target.get(k, 0) + v * factor
+
+        def parse_segment(seg: str, idx: int = 0) -> tuple[dict, int]:
+            counts: dict[str, int] = {}
+            n = len(seg)
+            while idx < n:
+                ch = seg[idx]
+                if ch == '(':
+                    inner, new_idx = parse_segment(seg, idx + 1)
+                    idx = new_idx
+                    # read multiplier
+                    m = re.match(r"(\d+)", seg[idx:])
+                    mult = int(m.group(1)) if m else 1
+                    if m:
+                        idx += len(m.group(1))
+                    merge_counts(counts, inner, mult)
+                    continue
+                if ch == ')':
+                    return counts, idx + 1
+                if ch == '[':
+                    # Handle bracketed groups similarly to parentheses
+                    inner, new_idx = parse_segment(seg, idx + 1)
+                    idx = new_idx
+                    m = re.match(r"(\d+)", seg[idx:])
+                    mult = int(m.group(1)) if m else 1
+                    if m:
+                        idx += len(m.group(1))
+                    merge_counts(counts, inner, mult)
+                    continue
+                if ch == ']':
+                    return counts, idx + 1
+                if ch == '.' or ch == '·':
+                    idx += 1
+                    continue
+                # Element symbol
+                m = re.match(r"([A-Z][a-z]?)", seg[idx:])
+                if not m:
+                    # skip any other tokens like charges
+                    idx += 1
+                    continue
+                elem = m.group(1)
+                idx += len(elem)
+                m2 = re.match(r"(\d+)", seg[idx:])
+                count = int(m2.group(1)) if m2 else 1
+                if m2:
+                    idx += len(m2.group(1))
+                counts[elem] = counts.get(elem, 0) + count
+            return counts, idx
+
+        # Handle hydrates or dot-separated parts: sum them
+        total: dict[str, int] = {}
+        # Split on '.' and '·'
+        parts = re.split(r"[\.·]", formula)
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            # Possible leading multiplier like '5H2O'
+            mlead = re.match(r"^(\d+)(.*)$", part)
+            lead_mult = 1
+            seg = part
+            if mlead:
+                lead_mult = int(mlead.group(1))
+                seg = mlead.group(2)
+            counts, _ = parse_segment(seg, 0)
+            merge_counts(total, counts, lead_mult)
+        return total
+
+    def compute_weight_from_counts(counts: dict) -> float:
+        total = 0.0
+        for elem, cnt in counts.items():
+            if elem not in ATOMIC_WEIGHTS:
+                raise ValueError(f"Unknown element in formula: {elem}")
+            total += ATOMIC_WEIGHTS[elem] * cnt
+        return total
+
     try:
         encoded_smiles = quote(smiles.strip())
+        # Retrieve molecular formula from PubChem for the SMILES
         url = (
             f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/{encoded_smiles}/"
-            "property/MolecularWeight/JSON"
+            "property/MolecularFormula/JSON"
         )
         response = requests.get(url, timeout=10, headers=headers)
         response.raise_for_status()
@@ -452,12 +794,14 @@ def smiles_to_molecular_weight(smiles: str):
         props = data.get("PropertyTable", {}).get("Properties", [])
         if not props:
             return {"error": "No property data found in PubChem response"}
-        weight = props[0].get("MolecularWeight")
-        if weight is None:
-            return {"error": "MolecularWeight not found in PubChem response"}
+        formula = props[0].get("MolecularFormula")
+        if not formula:
+            return {"error": "MolecularFormula not found in PubChem response"}
+        counts = parse_formula(formula)
+        weight = compute_weight_from_counts(counts)
         return float(weight)
     except Exception as exc:
-        return {"error": f"Failed to retrieve molecular weight: {exc}"}
+        return {"error": f"Failed to compute molecular weight from formula: {exc}"}
 
 def smiles_to_name(smiles: str) -> str:
     """
@@ -675,7 +1019,7 @@ def get_physical_properties(compound_input: str, input_type: str = "auto") -> di
     except Exception as e:
         return {"error": f"Failed to retrieve physical properties: {e}"}
 
-def search_compound_best_match(search_term: str) -> dict:
+def search_compound_best_match(search_term: str) -> dict: 
     """
     Search for a compound by name and return the best match with comprehensive information.
     Returns a dictionary with CID, name, SMILES, and other properties.

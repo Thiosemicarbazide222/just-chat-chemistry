@@ -13,6 +13,8 @@ agent_profiles:
       - package: "agent_tools.chemistry_tools"
         function: "smiles_to_molecular_weight"
       - package: "agent_tools.chemistry_tools"
+        function: "get_fda_approval"
+      - package: "agent_tools.chemistry_tools"
         function: "get_ld50"
       - package: "agent_tools.chemistry_tools"
         function: "get_ghs_classification"
@@ -34,6 +36,8 @@ agent_profiles:
         title: Name to SMILES Conversion
       - prompt: Compute the molecular weight for the SMILES string "CC(=O)OC1=CC=CC=C1C(=O)O"
         title: Molecular Weight from SMILES
+      - prompt: "Check whether acetylsalicylic acid is FDA approved and list application numbers"
+        title: FDA Approval Status
       - prompt: "Find LD50 data for acetone and list any species/route/values"
         title: LD50 from PubChem
       - prompt: "Get the GHS classification for acetone (signal word, H-codes, pictograms)"
@@ -50,6 +54,7 @@ agent_profiles:
       You have access to the following chemistry tools:
       - `smiles_to_name`: Converts SMILES strings to compound names using PubChem (always returns best match)
       - `name_to_smiles`: Converts compound names to SMILES strings using PubChem (works with IUPAC names, common names, and synonyms)
+      - `get_fda_approval`: Retrieves FDA approval information (approval status, Orange Book cues, application numbers) via PubChem PUG-View
       - `identify_functional_groups`: Identifies functional groups in molecules using SMILES or compound names
       - `search_compound_best_match`: Searches for compounds by name and returns comprehensive information including CID, name, SMILES, formula, and molecular weight (always returns best match)
       - `get_physical_properties`: Retrieves comprehensive physical properties from PubChem for any compound (accepts names, SMILES, or CIDs, auto-detects input type)
