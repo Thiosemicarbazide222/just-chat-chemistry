@@ -26,7 +26,125 @@ This directory contains utility scripts for setting up, configuring, and managin
   ./scripts/install_docker_ubuntu.sh
   ```
 
-### 3. `replacement_entrypoint.sh`
+### 3. `meilisearch_dump.py`
+- **Description:**  
+  A comprehensive tool for creating MeiliSearch dumps **AND** exporting data between instances. This script now supports both traditional dump creation and the new Meilisearch 1.16+ export functionality for direct instance-to-instance migration.
+
+- **Key Features:**
+  - **🆕 EXPORT MODE (Meilisearch 1.16+):** Direct instance-to-instance migration without dump files
+  - **DUMP MODE (Traditional):** Creates timestamped backup files with monitoring
+  - **🔒 AUTO-BACKUP (NEW):** Automatic backup creation before/after export operations for data safety
+  - **📁 IMPORT MANAGEMENT (NEW):** Automatic copy to `just_chat_rag.dump` with backup of existing
+  - Conflict resolution: additive operations with document replacement
+  - Selective export with index patterns and filters
+  - Settings override capabilities for target instances
+  - Configurable payload sizes for performance optimization
+  - Detailed timing information and progress feedback
+
+- **Usage:**  
+
+  **🚀 Export Mode (NEW - Recommended for 1.16+)**
+  ```bash
+  # Basic export with automatic backup (recommended)
+  uv run scripts/meilisearch_dump.py --export \
+    --target-url "http://production.example.com:7700" \
+    --target-api-key "target_master_key"
+  
+  # Export with import dump update (ready for immediate use)
+  uv run scripts/meilisearch_dump.py --export \
+    --target-url "http://staging.example.com:7700" \
+    --target-api-key "staging_key" \
+    --update-import
+  
+  # Export without backup (faster, but less safe)
+  uv run scripts/meilisearch_dump.py --export \
+    --target-url "http://dev.example.com:7700" \
+    --target-api-key "dev_key" \
+    --no-backup
+  
+  # Advanced export with selective patterns and settings
+  uv run scripts/meilisearch_dump.py --export \
+    --target-url "http://staging.example.com:7700" \
+    --target-api-key "staging_key" \
+    --index-patterns "products,users*" \
+    --override-settings \
+    --payload-size "100MiB" \
+    --filter "status = 'active'" \
+    --update-import
+  ```
+
+  **📁 Dump Mode (Traditional)**
+  ```bash
+  # Basic dump creation (uses environment defaults)
+  uv run scripts/meilisearch_dump.py
+  
+  # Dump with immediate import readiness (recommended)
+  uv run scripts/meilisearch_dump.py --update-import
+  
+  # With custom connection settings and import update
+  uv run scripts/meilisearch_dump.py --host localhost --port 7700 --api-key your_key --update-import
+  
+  # Custom dumps folder path
+  uv run scripts/meilisearch_dump.py --dumps-path /custom/dumps/path
+  ```
+
+- **Important Notes:**
+
+  **🆕 Export Mode (Meilisearch 1.16+):**
+  - ✅ **No file management required** - direct instance-to-instance transfer
+  - ✅ **Additive operation** - existing data is preserved, duplicates are replaced
+  - ✅ **Real-time migration** - no intermediate files or manual import steps
+  - 🔒 **Auto-backup by default** - creates PRE-EXPORT and POST-EXPORT dumps for safety
+  - 📁 **Import ready with --update-import** - automatically updates `just_chat_rag.dump` 
+  - ⚠️ **Requires target instance API access** - ensure target is accessible and has proper API key
+  - ⚠️ **Network connectivity required** during the entire export process
+  - 🐳 **Docker networking**: Use `172.17.0.1` (host gateway) instead of `localhost` for container-to-host communication
+  - 🔒 **Version requirement**: Both source and target instances MUST be Meilisearch 1.16.0 or higher
+
+  **📁 Dump Mode (Traditional):**
+  - **Critical**: Creates dumps with datetime format, but MeiliSearch import expects `just_chat_rag.dump`
+  - 📁 **Use --update-import** to automatically copy latest dump to `just_chat_rag.dump` (recommended)
+  - **Manual option**: `cp ./dumps/YYYYMMDD-HHMMSS.dump ./dumps/just_chat_rag.dump`
+  - 🛡️ **Automatic backup** - existing `just_chat_rag.dump` backed up to `.bak` before update
+  - Environment variables: `MEILISEARCH_HOST`, `MEILISEARCH_PORT`, `MEILI_MASTER_KEY`
+  - Dump files are saved to `./dumps/` directory by default
+
+- **Migration Workflows:**
+
+  **🚀 Modern Workflow (Export Mode - Recommended)**
+  1. Run export command with target instance details (auto-backup enabled)
+  2. Data is directly migrated with conflict resolution
+  3. Optional: Use `--update-import` for immediate local import readiness
+  4. Automatic PRE/POST-EXPORT backups created for safety
+  
+  **📁 Traditional Workflow (Dump Mode)**
+  1. Run the script with `--update-import` flag (recommended)
+  2. Dump created and automatically copied to `just_chat_rag.dump`
+  3. Transfer `just_chat_rag.dump` to target environment if needed
+  4. Remove MeiliSearch volume and restart: `docker compose down && docker volume rm just-chat_meili-data && docker compose up`
+  
+  **📁 Legacy Manual Workflow (if needed)**
+  1. Run the script to create a timestamped dump
+  2. Manually rename: `cp ./dumps/YYYYMMDD-HHMMSS.dump ./dumps/just_chat_rag.dump`
+  3. Transfer to target environment if needed
+  4. Remove MeiliSearch volume and restart: `docker compose down && docker volume rm just-chat_meili-data && docker compose up`
+
+- **Updating to Meilisearch 1.16+ for Export Features:**
+  ```bash
+  # Update your docker-compose.yml to use Meilisearch 1.16+
+  # services:
+  #   meilisearch:
+  #     image: getmeili/meilisearch:v1.20.0
+  
+  # Pull and restart with updated image
+  docker compose pull
+  docker compose up -d
+  
+  # Verify version
+  curl "http://localhost:7700/version"
+  ```
+
+### 4. `replacement_entrypoint.sh`
 - **Description:**  
   A customizable Docker entrypoint script that can replace the default entrypoint in the container. This script serves as a template that you can modify to add custom initialization logic. The script is particularly useful when you need to:
   - Add custom setup steps before the main application starts
