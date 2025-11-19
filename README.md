@@ -97,14 +97,19 @@ Chemistry tools are located in `/agent_tools/chemistry_tools/`, extending the ba
 
 ## 🔬 Chemistry Tools Included
 
-| Tool Name                | Description                                                                 |
-|--------------------------|-----------------------------------------------------------------------------|
-| `smiles_to_name`         | Converts SMILES strings to IUPAC names using PubChem                        |
-| `name_to_smiles`         | Converts IUPAC/common names to SMILES using PubChem                         |
-| `functional_groups`      | Identifies functional groups from SMILES or names                           |
-| `chemical_properties`    | Fetches physical and chemical properties (e.g. mol weight, BP, logP, etc.)  |
+| Tool Name                         | Description                                                                      |
+|-----------------------------------|----------------------------------------------------------------------------------|
+| `smiles_to_name`                  | Converts SMILES strings to IUPAC names using PubChem                             |
+| `name_to_smiles`                  | Converts IUPAC/common names to SMILES using PubChem                              |
+| `smiles_to_molecular_weight`      | Computes the molecular weight from SMILES                                        |
+| `get_fda_approval`                | Fetches substance's FDA approval using PubChem                                   |
+| `get_ld50`                        | Fetches LD50 for a substance using PubChem                                       |
+| `get_ghs_classification`          | Fetches GHS data for a substance using PubChem                                   |
+| `identify_functional_groups`      | Identifies functional groups from SMILES or names                                |
+| `search_compound_best_match`      | Searches for compounds by name and returns comprehensive information             |
+| `get_physical_properties`         | Fetches a compound's physical properties using PubChem                           |
+| `similarity_search_3d`            | Performs 3D similarity search using SMILES and returns similar compounds         |
 | `check_chemical_weapon_potential` | Checks PubChem for Chemical Weapons Convention schedules or warfare agent labels |
-| `similarity_search_3d`   | Performs 3D similarity search using SMILES and returns similar compounds    |
 
 Each tool uses public APIs like **PubChem** to ensure accurate and reliable chemistry data.
 
