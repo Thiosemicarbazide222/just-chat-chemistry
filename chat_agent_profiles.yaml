@@ -26,6 +26,8 @@ agent_profiles:
         function: "get_physical_properties"
       - package: "agent_tools.chemistry_tools"
         function: "similarity_search_3d"
+      - package: "agent_tools.chemistry_tools"
+        function: "check_chemical_weapon_potential"
     llm_options:
       model: groq/llama-3.3-70b-versatile
       temperature: 0.0
@@ -48,6 +50,8 @@ agent_profiles:
         title: "Physical Properties Retrieval"
       - prompt: "Find compounds similar to CC(=O)OC1=CC=CC=C1C(=O)O using 3D similarity search"
         title: "3D Similarity Search"
+      - prompt: "Check whether sarin is listed by PubChem as a chemical warfare agent and summarize the evidence."
+        title: "Chemical Weapon Screening"
     system_prompt: |
       You are a Chemistry Assistant specialized in molecular structure analysis and chemical information retrieval.
       

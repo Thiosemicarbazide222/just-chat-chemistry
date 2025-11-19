@@ -6,15 +6,77 @@
 
 This project depends on IFG (```https://github.com/wtriddle/IFG```). IFG must be installed for this project to work!
 
-Just clone the repository and run using Docker or Podman:
+Clone the repository and run using Docker or Podman:
 
 ```bash
-git clone https://github.com/your-org/just-chat-chem.git
-cd just-chat-chem
-USER_ID=$(id -u) GROUP_ID=$(id -g) docker-compose up
+git clone https://github.com/Thiosemicarbazide222/just-chat-chemistry
+cd just-chat-chemistry
 ```
 
-Then open your browser to `http://localhost:3000` to start chatting with your **chemistry agent**!
+### 1. Enable MongoDB for chat history & logging
+
+MongoDB is used to store:
+- users
+- conversations
+- searches (via a logging proxy in front of the agent backend)
+
+Create the Mongo env file (it can be empty or contain your own settings):
+
+```bash
+mkdir -p env
+touch env/.env.mongo
+```
+
+By default the stack starts a Mongo container named `just-chat-mongodb-for-agents` listening on `mongodb://chat-mongo:27017`.
+
+### 2. Start the stack
+
+With **Docker**:
+
+```bash
+USER_ID=$(id -u) GROUP_ID=$(id -g) docker compose up
+```
+
+With **Podman**:
+
+```bash
+USER_ID=$(id -u) GROUP_ID=$(id -g) podman-compose up
+```
+
+Services started:
+- `rag-core` – core RAG/agent backend
+- `just-chat-agents` – logging proxy (FastAPI + uvicorn) that:
+  - forwards all `/v1/chat/completions` requests to `rag-core`
+  - logs users and their searches into MongoDB (`just_chat.users` and `just_chat.searches`)
+- `chat-ui` – web UI on port `3000`
+- `just-chat-mongodb-for-agents` – MongoDB
+- `just-chat-mongo-express` – Mongo Express UI on port `8081`
+
+Then open your browser at:
+- Chat UI: `http://localhost:3000`
+- MongoDB UI: `http://localhost:8081`
+
+### 3. Verifying search logging
+
+Every time a user sends a message, the UI calls the OpenAI‑compatible endpoint exposed by `just-chat-agents`, which:
+- extracts the latest user message
+- upserts a user document
+- inserts a search document
+
+You can verify this in Mongo:
+
+```bash
+podman exec just-chat-mongodb-for-agents mongosh \
+  "mongodb://chat-mongo:27017/just_chat?authSource=admin" \
+  --eval "db.searches.find().sort({_id:-1}).limit(5).forEach(doc => printjson(doc))"
+```
+
+Or via Mongo Express at `http://localhost:8081`:
+- database: `just_chat`
+- collections: `users`, `searches`
+
+> For a fresh clone you do **not** need manual Mongo migrations: `env/.env.local` already points the chat assistants at `http://just-chat-agents:8091/v1`, so all messages go through the logging proxy by default.
+
 
 ## 🧪 What’s Special About This Fork?
 
@@ -41,6 +103,7 @@ Chemistry tools are located in `/agent_tools/chemistry_tools/`, extending the ba
 | `name_to_smiles`         | Converts IUPAC/common names to SMILES using PubChem                         |
 | `functional_groups`      | Identifies functional groups from SMILES or names                           |
 | `chemical_properties`    | Fetches physical and chemical properties (e.g. mol weight, BP, logP, etc.)  |
+| `check_chemical_weapon_potential` | Checks PubChem for Chemical Weapons Convention schedules or warfare agent labels |
 | `similarity_search_3d`   | Performs 3D similarity search using SMILES and returns similar compounds    |
 
 Each tool uses public APIs like **PubChem** to ensure accurate and reliable chemistry data.

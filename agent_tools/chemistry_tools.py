@@ -247,6 +247,172 @@ def get_ghs_classification(compound_input: str, input_type: str = "auto") -> dic
         result["note"] = "No explicit GHS data found in PubChem PUG-View sections."
     return result
 
+def check_chemical_weapon_potential(compound_input: str, input_type: str = "auto") -> dict:
+    """
+    Determine whether PubChem describes the substance as a chemical weapon or warfare agent.
+    Uses PubChem PUG-View sections to search for Chemical Weapons Convention (CWC) schedules,
+    warfare agent designations (nerve, blister, choking, riot control, etc.), and related labels.
+
+    Args:
+        compound_input: Compound name, SMILES, or CID.
+        input_type: "auto" | "name" | "smiles" | "cid"
+
+    Returns:
+        dict with keys:
+            - cid
+            - is_potential_chemical_weapon (bool)
+            - confidence ("high" | "medium" | "low" | "unknown")
+            - detected_keywords (list[str])
+            - evidence (list[{section, text, keyword, confidence}])
+            - note (str, optional)
+        or {"error": "..."}
+    """
+    from urllib.parse import quote
+    import re
+
+    if not compound_input or not compound_input.strip():
+        return {"error": "No compound input provided."}
+
+    headers = {"User-Agent": "just-chat-chemistry-tools/1.0"}
+
+    # Resolve input to CID
+    try:
+        if input_type == "auto":
+            stripped = compound_input.strip()
+            if re.match(r"^\d+$", stripped):
+                input_type = "cid"
+            elif re.match(r"^[A-Za-z0-9()[\]{}@+\-=\\#%$:;.,]+$", stripped) and any(
+                c in stripped for c in ["(", ")", "=", "#", "@", "[", "]"]
+            ):
+                input_type = "smiles"
+            else:
+                input_type = "name"
+
+        cid = None
+        if input_type == "cid":
+            cid = int(compound_input)
+        elif input_type == "smiles":
+            sm = quote(compound_input.strip())
+            url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/{sm}/cids/JSON"
+            resp = requests.get(url, timeout=15, headers=headers)
+            resp.raise_for_status()
+            j = resp.json()
+            cid = j.get("IdentifierList", {}).get("CID", [None])[0]
+        elif input_type == "name":
+            nm = quote(compound_input.strip())
+            url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{nm}/cids/JSON"
+            resp = requests.get(url, timeout=15, headers=headers)
+            resp.raise_for_status()
+            j = resp.json()
+            if "IdentifierList" in j and "CID" in j["IdentifierList"]:
+                cid = j["IdentifierList"]["CID"][0]
+            elif "InformationList" in j and "Information" in j["InformationList"]:
+                info = j["InformationList"]["Information"][0]
+                if "CID" in info and info["CID"]:
+                    cid = info["CID"][0]
+        if not cid:
+            return {"error": f"Could not resolve CID for input: {compound_input}"}
+    except Exception as exc:
+        return {"error": f"Failed to resolve input to CID: {exc}"}
+
+    # Fetch PUG-View data
+    try:
+        view_url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug_view/data/compound/{cid}/JSON/"
+        resp = requests.get(view_url, timeout=30, headers=headers)
+        resp.raise_for_status()
+        view = resp.json()
+    except Exception as exc:
+        return {"error": f"Failed to fetch PubChem PUG-View data: {exc}"}
+
+    def iterate_sections(node):
+        if isinstance(node, dict):
+            yield node
+            for key in ("Section", "Children", "Sections"):
+                if key in node and isinstance(node[key], list):
+                    for child in node[key]:
+                        yield from iterate_sections(child)
+        elif isinstance(node, list):
+            for item in node:
+                yield from iterate_sections(item)
+
+    def extract_strings(info: dict) -> list[str]:
+        texts: list[str] = []
+        value = info.get("Value") or {}
+        strings = value.get("StringWithMarkup") or []
+        for entry in strings:
+            text = entry.get("String")
+            if isinstance(text, str) and text.strip():
+                texts.append(text.strip())
+        desc = info.get("Description")
+        if isinstance(desc, str) and desc.strip():
+            texts.append(desc.strip())
+        name = info.get("Name")
+        if isinstance(name, str) and name.strip():
+            texts.append(name.strip())
+        return texts
+
+    keyword_rules = [
+        {"pattern": r"\bchemical weapon", "confidence": "high", "label": "Explicit 'chemical weapon' mention"},
+        {"pattern": r"\bchemical warfare agent", "confidence": "high", "label": "Chemical warfare agent"},
+        {"pattern": r"\bcwc\b", "confidence": "medium", "label": "Chemical Weapons Convention reference"},
+        {"pattern": r"\bschedule\s*1\b", "confidence": "high", "label": "CWC Schedule 1"},
+        {"pattern": r"\bschedule\s*2\b", "confidence": "medium", "label": "CWC Schedule 2"},
+        {"pattern": r"\bschedule\s*3\b", "confidence": "medium", "label": "CWC Schedule 3"},
+        {"pattern": r"\bnerve agent", "confidence": "high", "label": "Nerve agent classification"},
+        {"pattern": r"\bblister agent|\bvesicant", "confidence": "high", "label": "Blister/Vesicant agent"},
+        {"pattern": r"\bchoking agent|\bpulmonary agent", "confidence": "medium", "label": "Choking/Pulmonary agent"},
+        {"pattern": r"\briot control agent|\blachrymator|\blachrymatory", "confidence": "medium", "label": "Riot-control agent"},
+        {"pattern": r"\bincapacitating agent", "confidence": "medium", "label": "Incapacitating agent"},
+        {"pattern": r"\bblood agent", "confidence": "medium", "label": "Blood agent"},
+        {"pattern": r"\bcombat\b.+\bagent", "confidence": "medium", "label": "Combat agent reference"},
+    ]
+    confidence_rank = {"low": 1, "medium": 2, "high": 3}
+
+    evidence = []
+    detected_keywords = set()
+    best_confidence = "unknown"
+    best_rank = 0
+    dedupe_hits = set()
+
+    record = (view or {}).get("Record", {})
+    for section in iterate_sections(record.get("Section", [])):
+        heading = section.get("TOCHeading") or "Unknown section"
+        infos = section.get("Information") or []
+        for info in infos:
+            for text in extract_strings(info):
+                lower_text = text.lower()
+                for rule in keyword_rules:
+                    if re.search(rule["pattern"], lower_text, flags=re.IGNORECASE):
+                        key = (text, rule["label"])
+                        if key in dedupe_hits:
+                            continue
+                        dedupe_hits.add(key)
+                        evidence.append(
+                            {
+                                "section": heading,
+                                "text": text,
+                                "keyword": rule["label"],
+                                "confidence": rule["confidence"],
+                            }
+                        )
+                        detected_keywords.add(rule["label"])
+                        rank = confidence_rank.get(rule["confidence"], 0)
+                        if rank > best_rank:
+                            best_rank = rank
+                            best_confidence = rule["confidence"]
+
+    result = {
+        "cid": cid,
+        "is_potential_chemical_weapon": bool(evidence),
+        "confidence": best_confidence,
+        "detected_keywords": sorted(detected_keywords),
+        "evidence": evidence,
+        "source": "PubChem PUG-View",
+    }
+    if not evidence:
+        result["note"] = "No chemical weapon designations found in PubChem records."
+    return result
+
 def get_ld50(compound_input: str, input_type: str = "auto") -> dict:
     """
     Retrieve LD50 toxicity data for a compound using PubChem PUG-View.

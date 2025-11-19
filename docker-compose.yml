@@ -105,7 +105,7 @@ services:
       ALLOW_INSECURE_COOKIES: "true"
       INCLUDE_DB: "False"
     volumes:
-      - "./env/.env.local:/app/.env.local:z"
+      - "./env/.env.local:/app/.env.local:ro,Z" # .env.local is read only and Z is to preserve the file permissions
     ports:
       - "0.0.0.0:3000:3000"
     depends_on:
