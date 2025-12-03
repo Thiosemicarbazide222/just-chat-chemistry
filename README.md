@@ -77,7 +77,6 @@ Or via Mongo Express at `http://localhost:8081`:
 
 > For a fresh clone you do **not** need manual Mongo migrations: `env/.env.local` already points the chat assistants at `http://just-chat-agents:8091/v1`, so all messages go through the logging proxy by default.
 
-
 ## 🧪 What’s Special About This Fork?
 
 This version includes a **specialized chemistry agent** with tools that allow:
@@ -103,7 +102,6 @@ Chemistry tools are located in `/agent_tools/chemistry_tools/`, extending the ba
 | `name_to_smiles`         | Converts IUPAC/common names to SMILES using PubChem                         |
 | `functional_groups`      | Identifies functional groups from SMILES or names                           |
 | `chemical_properties`    | Fetches physical and chemical properties (e.g. mol weight, BP, logP, etc.)  |
-| `check_chemical_weapon_potential` | Checks PubChem for Chemical Weapons Convention schedules or warfare agent labels |
 | `similarity_search_3d`   | Performs 3D similarity search using SMILES and returns similar compounds    |
 
 Each tool uses public APIs like **PubChem** to ensure accurate and reliable chemistry data.

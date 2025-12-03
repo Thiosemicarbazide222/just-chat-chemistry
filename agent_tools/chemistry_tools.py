@@ -6,27 +6,32 @@ import sys
 def get_ghs_classification(compound_input: str, input_type: str = "auto") -> dict:
     """
     Retrieve GHS classification from PubChem PUG-View, including hazard classes, categories,
-    signal word, hazard statements (H-codes), and pictograms.
+    signal word, hazard statements (H-codes), and ALWAYS-INFERRED GHS pictograms.
 
     Args:
         compound_input: name, SMILES, or CID
         input_type: "auto" | "name" | "smiles" | "cid"
 
     Returns:
-        dict with keys: cid, signal_word, pictograms, hazard_classes, hazard_statements
-        or {"error": ...}
+        dict with keys: cid, signal_word, hazard_classes, hazard_statements,
+        pictograms, pictogram_markdown
     """
+    import requests
     from urllib.parse import quote
     import re
 
     headers = {"User-Agent": "just-chat-chemistry-tools/1.0"}
 
-    # Resolve input to CID
+    # ---------------------------
+    # Resolve input → CID
+    # ---------------------------
     try:
         if input_type == "auto":
             if re.match(r'^\d+$', compound_input):
                 input_type = "cid"
-            elif re.match(r'^[A-Za-z0-9()[\]{}@+\-=\\#%$:;.,]+$', compound_input) and any(c in compound_input for c in ['(', ')', '=', '#', '@']):
+            elif re.match(r'^[A-Za-z0-9()[\]{}@+\-=\\#%$:;.,]+$', compound_input) and any(
+                c in compound_input for c in ['(', ')', '=', '#', '@']
+            ):
                 input_type = "smiles"
             else:
                 input_type = "name"
@@ -34,6 +39,7 @@ def get_ghs_classification(compound_input: str, input_type: str = "auto") -> dic
         cid = None
         if input_type == "cid":
             cid = int(compound_input)
+
         elif input_type == "smiles":
             sm = quote(compound_input.strip())
             url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/smiles/{sm}/cids/JSON"
@@ -41,24 +47,30 @@ def get_ghs_classification(compound_input: str, input_type: str = "auto") -> dic
             r.raise_for_status()
             j = r.json()
             cid = j.get("IdentifierList", {}).get("CID", [None])[0]
+
         elif input_type == "name":
             nm = quote(compound_input.strip())
             url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{nm}/cids/JSON"
             r = requests.get(url, timeout=15, headers=headers)
             r.raise_for_status()
             j = r.json()
+
             if "IdentifierList" in j and "CID" in j["IdentifierList"]:
                 cid = j["IdentifierList"]["CID"][0]
             elif "InformationList" in j and "Information" in j["InformationList"]:
                 info = j["InformationList"]["Information"][0]
                 if "CID" in info and info["CID"]:
                     cid = info["CID"][0]
+
         if not cid:
             return {"error": f"Could not resolve CID for input: {compound_input}"}
+
     except Exception as e:
         return {"error": f"Failed to resolve input to CID: {e}"}
 
-    # Fetch PUG-View data
+    # ---------------------------
+    # Fetch PubChem PUG-View JSON
+    # ---------------------------
     try:
         view_url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug_view/data/compound/{cid}/JSON/"
         resp = requests.get(view_url, timeout=30, headers=headers)
@@ -67,11 +79,13 @@ def get_ghs_classification(compound_input: str, input_type: str = "auto") -> dic
     except Exception as e:
         return {"error": f"Failed to fetch PUG-View data: {e}"}
 
-    # Traverse sections helper
+    # ---------------------------
+    # Recursive section walker
+    # ---------------------------
     def iterate_sections(node):
         if isinstance(node, dict):
             yield node
-            for key in ("Section", "Children", "Sections"):
+            for key in ("Section", "Sections", "Children"):
                 if key in node and isinstance(node[key], list):
                     for child in node[key]:
                         yield from iterate_sections(child)
@@ -79,132 +93,60 @@ def get_ghs_classification(compound_input: str, input_type: str = "auto") -> dic
             for item in node:
                 yield from iterate_sections(item)
 
-    # Collect GHS-related data
+    # ---------------------------
+    # Data extraction containers
+    # ---------------------------
     signal_word = None
-    pictograms = []
-    hazard_classes = []  # items like {class, category}
-    hazard_statements = []  # items like {code, text}
+    hazard_classes = []
+    hazard_statements = []
 
     record = (view or {}).get("Record", {})
+
+    # ---------------------------
+    # Extract hazard classes + H-codes
+    # ---------------------------
     for sec in iterate_sections(record.get("Section", [])):
         heading = (sec.get("TOCHeading") or "").lower()
-        if not any(h in heading for h in ["ghs", "globally harmonized", "hazard classification", "hazards", "safety"]):
+
+        if not any(h in heading for h in ["ghs", "hazard", "safety", "classification"]):
             continue
 
-        # Information entries can contain StringWithMarkup with structured content
         for info in (sec.get("Information") or []):
             val = info.get("Value") or {}
-            strings = [s.get("String") for s in (val.get("StringWithMarkup") or []) if s.get("String")]
-            # Extract possible external image/data URLs that may include pictograms
-            urls = []
-            if isinstance(val.get("ExternalDataURL"), list):
-                urls.extend([u for u in val.get("ExternalDataURL") if isinstance(u, str)])
-            if isinstance(val.get("URL"), list):
-                urls.extend([u for u in val.get("URL") if isinstance(u, str)])
-            if isinstance(val.get("ExternalDataURL"), str):
-                urls.append(val.get("ExternalDataURL"))
-            if isinstance(val.get("URL"), str):
-                urls.append(val.get("URL"))
+            strings = [
+                s.get("String")
+                for s in (val.get("StringWithMarkup") or [])
+                if isinstance(s, dict) and s.get("String")
+            ]
 
-            # Try to detect GHS pictogram codes in strings or URLs and capture images
-            detected_codes = []
             for s in strings:
                 if not s:
                     continue
-                for m in re.finditer(r"\bGHS0?([1-9])\b", s, flags=re.IGNORECASE):
-                    detected_codes.append(f"GHS0{m.group(1)}")
-                if any(k in s.lower() for k in ["skull", "flame", "exclamation", "corrosion", "gas cylinder", "health hazard", "environment", "exploding bomb"]):
-                    # Keep free-text hint; URL matching below may attach an image
-                    detected_codes.append(s)
-            for u in urls:
-                if not isinstance(u, str):
-                    continue
-                m = re.search(r"(GHS0?[1-9])", u, flags=re.IGNORECASE)
-                if m:
-                    detected_codes.append(m.group(1).upper())
 
-            # If this Information block looks like pictograms, add structured entries
-            info_name = (info.get("Name") or "").lower()
-            looks_like_picto = ("pictogram" in info_name) or any("pictogram" in (s or '').lower() for s in strings)
-            if looks_like_picto or detected_codes or urls:
-                # Map codes to matching URLs when possible
-                used_pairs = set()
-                for code in {c for c in detected_codes if isinstance(c, str) and c.upper().startswith("GHS")}:
-                    matched_url = None
-                    for u in urls:
-                        if isinstance(u, str) and code.lower() in u.lower():
-                            matched_url = u
-                            break
-                    key = (code.upper(), matched_url)
-                    if key in used_pairs:
-                        continue
-                    used_pairs.add(key)
-                    pictograms.append({"code": code.upper(), "image_url": matched_url})
-                # Add any remaining URLs without detected code as generic pictograms
-                for u in urls:
-                    key = (None, u)
-                    if key in used_pairs:
-                        continue
-                    used_pairs.add(key)
-                    if isinstance(u, str):
-                        pictograms.append({"code": None, "image_url": u})
-
-            for s in strings:
-                s_l = s.lower()
                 # Signal word
-                if not signal_word and ("signal word:" in s_l or s_l.startswith("signal word")):
-                    # e.g., "Signal word: Danger"
-                    parts = s.split(":", 1)
-                    if len(parts) == 2:
-                        signal_word = parts[1].strip()
-                    else:
-                        # fallback: last token
-                        signal_word = s.strip().split()[-1]
+                sl = s.lower()
+                if ("signal word" in sl) and (":" in s):
+                    signal_word = s.split(":", 1)[1].strip()
 
-                # Hazard classes and categories
-                # Example: "Acute toxicity (oral) - Category 3"
-                m = re.search(r"([A-Za-z ].*?\))\s*-\s*Category\s*(\d+[A-Za-z]?)", s)
+                # Hazard class (Category)
+                m = re.search(r"(.*?)[\s]*-[\s]*Category\s*([0-9A-Za-z]+)", s)
                 if m:
                     hazard_classes.append({
                         "class": m.group(1).strip(),
                         "category": m.group(2).strip()
                     })
 
-                # Hazard statements H-codes
-                # Example: "H225: Highly flammable liquid and vapor"
-                hm = re.search(r"\b(H\d{3}[A-Z]?)\b\s*:\s*(.+)$", s)
+                # H-code
+                hm = re.search(r"\b(H\d{3}[A-Z]?)\b[: ]*(.*)", s)
                 if hm:
                     hazard_statements.append({
                         "code": hm.group(1),
                         "text": hm.group(2).strip()
                     })
 
-            # Also inspect Name/Description fields for structured tags
-            name = info.get("Name") or ""
-            if name.lower().startswith("signal word") and not signal_word:
-                # Try extract from Description/String if present
-                desc = info.get("Description") or ""
-                if desc:
-                    signal_word = desc.strip()
-
-    # Normalize pictograms: ensure list of dicts with code and image_url, dedupe by (code,url)
-    normalized = []
-    seen = set()
-    for p in pictograms:
-        if isinstance(p, dict):
-            code = p.get("code")
-            url = p.get("image_url")
-        else:
-            code = None
-            url = None
-        key = (code, url)
-        if key in seen:
-            continue
-        seen.add(key)
-        normalized.append({"code": code, "image_url": url})
-    pictograms = normalized
-
-    # Fallback mapping for standard GHS diamond pictogram images (Wikimedia Commons)
+    # ---------------------------
+    # ALWAYS-INFERRED PICTOGRAMS
+    # ---------------------------
     code_to_fallback_image = {
         "GHS01": "https://upload.wikimedia.org/wikipedia/commons/6/6b/GHS-pictogram-explos.svg",
         "GHS02": "https://upload.wikimedia.org/wikipedia/commons/5/5a/GHS-pictogram-flamme.svg",
@@ -217,35 +159,52 @@ def get_ghs_classification(compound_input: str, input_type: str = "auto") -> dic
         "GHS09": "https://upload.wikimedia.org/wikipedia/commons/f/f7/GHS-pictogram-environnement.svg",
     }
 
-    # Ensure each pictogram with a known code has an image_url
-    for p in pictograms:
-        code = p.get("code")
-        if code and not p.get("image_url"):
-            fallback_url = code_to_fallback_image.get(code.upper())
-            if fallback_url:
-                p["image_url"] = fallback_url
+    hcodes = {h["code"] for h in hazard_statements}
 
-    # Prepare markdown image snippets for easy rendering in UI
-    pictogram_markdown = []
-    for p in pictograms:
-        code = p.get("code") or "GHS"
-        url = p.get("image_url")
-        if url:
-            pictogram_markdown.append(f"![{code}]({url})")
+    inferred_pictos = set()
 
-    result = {
+    # Explosive
+    if any(h.startswith("H20") for h in hcodes):
+        inferred_pictos.add("GHS01")
+
+    # Acute toxicity
+    if any(h.startswith(x) for x in ("H30", "H31", "H33") for h in hcodes):
+        inferred_pictos.add("GHS06")
+
+    # Environmental hazard
+    if any(h.startswith("H40") or h.startswith("H41") for h in hcodes):
+        inferred_pictos.add("GHS09")
+
+    # STOT / carcinogenicity / reproductive toxicity
+    if any(h.startswith("H36") or h.startswith("H37") or h.startswith("H38") for h in hcodes):
+        inferred_pictos.add("GHS08")
+
+    # Skin/eye irritation pictogram
+    if any(x in hcodes for x in ("H315", "H319", "H335")):
+        inferred_pictos.add("GHS07")
+
+    pictograms = [
+        {"code": code, "image_url": code_to_fallback_image.get(code)}
+        for code in sorted(inferred_pictos)
+    ]
+
+    pictogram_markdown = [
+        f"![{p['code']}]({p['image_url']})"
+        for p in pictograms
+    ]
+
+    # ---------------------------
+    # Final result
+    # ---------------------------
+    return {
         "cid": cid,
         "signal_word": signal_word,
-        "pictograms": pictograms,
-        "pictogram_markdown": pictogram_markdown,
         "hazard_classes": hazard_classes,
-        "hazard_statements": hazard_statements
+        "hazard_statements": hazard_statements,
+        "pictograms": pictograms,
+        "pictogram_markdown": pictogram_markdown
     }
 
-    # Provide a helpful message if nothing found
-    if not any([signal_word, pictograms, hazard_classes, hazard_statements]):
-        result["note"] = "No explicit GHS data found in PubChem PUG-View sections."
-    return result
 
 def check_chemical_weapon_potential(compound_input: str, input_type: str = "auto") -> dict:
     """
