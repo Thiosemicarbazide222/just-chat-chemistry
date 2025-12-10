@@ -1,0 +1,150 @@
+{
+  "smarts_atom_primitives": [
+    { "symbol": "*", "name": "wildcard", "requirement": "any atom", "default": null },
+    { "symbol": "a", "name": "aromatic", "requirement": "aromatic", "default": null },
+    { "symbol": "A", "name": "aliphatic", "requirement": "aliphatic", "default": null },
+    { "symbol": "D<n>", "name": "degree", "requirement": "<n> explicit connections", "default": "exactly one" },
+    { "symbol": "H<n>", "name": "total-H-count", "requirement": "<n> attached hydrogens", "default": "exactly one" },
+    { "symbol": "h<n>", "name": "implicit-H-count", "requirement": "<n> implicit hydrogens", "default": "at least one" },
+    { "symbol": "R<n>", "name": "ring membership", "requirement": "in <n> SSSR rings", "default": "any ring atom" },
+    { "symbol": "r<n>", "name": "ring size", "requirement": "in smallest SSSR ring of size <n>", "default": "any ring atom" },
+    { "symbol": "v<n>", "name": "valence", "requirement": "total bond order <n>", "default": "exactly one" },
+    { "symbol": "X<n>", "name": "connectivity", "requirement": "<n> total connections", "default": "exactly one" },
+    { "symbol": "x<n>", "name": "ring connectivity", "requirement": "<n> total ring connections", "default": "at least one" },
+    { "symbol": "-<n>", "name": "negative charge", "requirement": "-<n> charge", "default": "-1 charge" },
+    { "symbol": "+<n>", "name": "positive charge", "requirement": "+<n> formal charge", "default": "+1 charge" },
+    { "symbol": "#n", "name": "atomic number", "requirement": "atomic number <n>", "default": null },
+    { "symbol": "@", "name": "chirality", "requirement": "anticlockwise", "default": "anticlockwise (default class)" },
+    { "symbol": "@@", "name": "chirality", "requirement": "clockwise", "default": "clockwise (default class)" },
+    { "symbol": "@<c><n>", "name": "chirality", "requirement": "chiral class <c> chirality <n>", "default": null },
+    { "symbol": "@<c><n>?", "name": "chiral or unspec", "requirement": "chirality <c><n> or unspecified", "default": null },
+    { "symbol": "<n>", "name": "atomic mass", "requirement": "explicit atomic mass", "default": "unspecified mass" }
+  ],
+
+  "smarts_atom_examples": [
+    { "pattern": "C", "meaning": "aliphatic carbon atom" },
+    { "pattern": "c", "meaning": "aromatic carbon atom" },
+    { "pattern": "a", "meaning": "aromatic atom" },
+    { "pattern": "[#6]", "meaning": "carbon atom" },
+    { "pattern": "[Ca]", "meaning": "calcium atom" },
+    { "pattern": "[++]", "meaning": "atom with a +2 charge" },
+    { "pattern": "[R]", "meaning": "atom in any ring" },
+    { "pattern": "[D3]", "meaning": "atom with 3 explicit bonds" },
+    { "pattern": "[X3]", "meaning": "atom with 3 total bonds" },
+    { "pattern": "[v3]", "meaning": "atom with bond orders totaling 3" },
+    { "pattern": "C[C@H](F)O", "meaning": "chiral center anticlockwise" },
+    { "pattern": "C[C@?H](F)O", "meaning": "chiral or unspecified" }
+  ],
+
+  "smarts_bond_primitives": [
+    { "symbol": "-", "meaning": "single bond (aliphatic)" },
+    { "symbol": "/", "meaning": "directional bond up" },
+    { "symbol": "\\", "meaning": "directional bond down" },
+    { "symbol": "/?", "meaning": "directional up or unspecified" },
+    { "symbol": "\\?", "meaning": "directional down or unspecified" },
+    { "symbol": "=", "meaning": "double bond" },
+    { "symbol": "#", "meaning": "triple bond" },
+    { "symbol": ":", "meaning": "aromatic bond" },
+    { "symbol": "~", "meaning": "any bond" },
+    { "symbol": "@", "meaning": "any ring bond" }
+  ],
+
+  "smarts_bond_examples": [
+    { "pattern": "C", "meaning": "any aliphatic carbon" },
+    { "pattern": "cc", "meaning": "attached aromatic carbons" },
+    { "pattern": "c:c", "meaning": "aromatic carbons with aromatic bond" },
+    { "pattern": "c-c", "meaning": "aromatic carbons with single bond" }
+  ],
+
+  "smarts_logical_operators": [
+    { "symbol": "!", "expression": "!e1", "meaning": "not e1" },
+    { "symbol": "&", "expression": "e1&e2", "meaning": "e1 AND e2 (high precedence)" },
+    { "symbol": ",", "expression": "e1,e2", "meaning": "e1 OR e2" },
+    { "symbol": ";", "expression": "e1;e2", "meaning": "e1 AND e2 (low precedence)" }
+  ],
+
+  "examples": [
+    { "pattern": "[CH2]", "meaning": "methylene carbon" },
+    { "pattern": "[!C;R]", "meaning": "not aliphatic C AND in ring" },
+    { "pattern": "[!C;!R0]", "meaning": "not in zero rings" },
+    { "pattern": "[n;H1]", "meaning": "H-pyrrole nitrogen" },
+    { "pattern": "[c,n&H1]", "meaning": "arom carbon OR H-pyrrole N" },
+    { "pattern": "[X3&H0]", "meaning": "3 total bonds and no hydrogens" }
+  ],
+
+  "environment_patterns": [
+    { "pattern": "*C", "meaning": "atom connected to methyl carbon" },
+    { "pattern": "*CC", "meaning": "atom connected to ethyl carbon" },
+    { "pattern": "[$(*C);$(*CC)]", "meaning": "atom in both environments" }
+  ],
+
+  "ortho_meta_examples": [
+    { "pattern": "CaaO", "meaning": "C ortho to O" },
+    { "pattern": "CaaaN", "meaning": "C meta to N" },
+    { "pattern": "Caa(O)aN", "meaning": "C ortho to O & meta to N (2O,3N only)" },
+    { "pattern": "Ca(aO)aaN", "meaning": "C ortho to O & meta to N (2O,5N only)" },
+    { "pattern": "C[$(aaO);$(aaaN)]", "meaning": "C ortho to O & meta to N (complete)" }
+  ],
+
+  "component_level_grouping": [
+    { "pattern": "C.C", "target": "CCCC", "match": true },
+    { "pattern": "(C.C)", "target": "CCCC", "match": true },
+    { "pattern": "(C).(C)", "target": "CCCC", "match": false },
+    { "pattern": "(C).(C)", "target": "CCCC.CCCC", "match": true },
+    { "pattern": "(C).C", "target": "CCCC", "match": true },
+    { "pattern": "(C).(C).C", "target": "CCCC.CCCC", "match": true }
+  ],
+
+  "reaction_smarts_examples": [
+    {
+      "pattern": "C(=O)O.OCC>>C(=O)OCC.O",
+      "meaning": "esterifications"
+    },
+    {
+      "pattern": "(C(=O)O).(OCC)>>C(=O)OCC.O",
+      "meaning": "intermolecular esterifications"
+    },
+    {
+      "pattern": "(C(=O)O.OCC)>>C(=O)OCC.O",
+      "meaning": "lactonizations"
+    }
+  ],
+
+  "reaction_smarts_detailed": [
+    { "query": "C>>", "target": "CC>>CN", "matches": 2 },
+    { "query": ">C>", "target": "CC>>CN", "matches": 0 },
+    { "query": ">>C", "target": "CC>>CN", "matches": 1 },
+    { "query": "C", "target": "CC>>CN", "matches": 3 },
+
+    { "query": "C>>C", "target": "CC>>CC", "matches": 4, "comment": "normal" },
+    { "query": "C>>C", "target": "[CH3:7][CH3:8]>>[CH3:7][CH3:8]", "matches": 4, "comment": "maps ignored" },
+    { "query": "[C:1]>>C", "target": "[CH3:7][CH3:8]>>[CH3:7][CH3:8]", "matches": 4 },
+    { "query": "[C:1]>>[C:1]", "target": "CC>>CC", "matches": 0 },
+    { "query": "[C:?1]>>[C:?1]", "target": "CC>>CC", "matches": 4 },
+    { "query": "[C:1]>>[C:1]", "target": "[CH3:7][CH3:8]>>[CH3:7][CH3:8]", "matches": 2 },
+    { "query": "[C:1]>>[C:2]", "target": "[CH3:7][CH3:8]>>[CH3:7][CH3:8]", "matches": 4 },
+    { "query": "[C:1][C:1]>>[C:1]", "target": "[CH3:7][CH3:7]>>[CH3:7][CH3:7]", "matches": 4 },
+    { "query": "[C:1][C:1]>>[C:1]", "target": "[CH3:7][CH3:8]>>[CH3:7][CH3:8]", "matches": 4 },
+    { "query": "[C:1][C:1]>>[C:1]", "target": "[CH3:7][CH3:7]>>[CH3:7][CH3:8]", "matches": 2 }
+  ],
+
+  "more_examples": [
+    { "pattern": "cc", "meaning": "attached aromatic carbons" },
+    { "pattern": "c:c", "meaning": "aromatic bond between aromatic carbons" },
+    { "pattern": "c-c", "meaning": "single bond between aromatic carbons" },
+    { "pattern": "O", "meaning": "any aliphatic oxygen" },
+    { "pattern": "[O;H1]", "meaning": "hydroxy oxygen" },
+    { "pattern": "[O;D1]", "meaning": "1-connected oxygen" },
+    { "pattern": "[O;D2]", "meaning": "2-connected oxygen" },
+    { "pattern": "[C,c]", "meaning": "any carbon" },
+    { "pattern": "[F,Cl,Br,I]", "meaning": "first four halogens" },
+    { "pattern": "[N;R]", "meaning": "aliphatic nitrogen in ring" },
+    { "pattern": "[!C;R]", "meaning": "not aliphatic carbon AND in ring" },
+    { "pattern": "[n;H1]", "meaning": "H-pyrrole nitrogen" },
+    { "pattern": "[c,n&H1]", "meaning": "arom carbon OR H-pyrrole N" },
+    { "pattern": "[c,n;H1]", "meaning": "arom C or N with exactly one H" },
+    { "pattern": "*!@*", "meaning": "two atoms connected by a non-ring bond" },
+    { "pattern": "*@;!:*", "meaning": "two atoms connected by a non-aromatic ring bond" },
+    { "pattern": "[C,c]=,#[C,c]", "meaning": "two carbons connected by double or triple bond" }
+  ]
+}
