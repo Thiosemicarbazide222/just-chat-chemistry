@@ -3,6 +3,19 @@ import eliot
 import os
 import sys
 
+def _get_rdkit_chem():
+    """
+    Lazy import RDKit's Chem module. Raise ImportError with an actionable message if missing.
+    """
+    try:
+        from rdkit import Chem  # type: ignore
+        return Chem
+    except Exception:
+        raise ImportError(
+            "RDKit is not installed. Install via conda (recommended): "
+            "conda install -c conda-forge rdkit python=3.10"
+        )
+    
 def get_ghs_classification(compound_input: str, input_type: str = "auto") -> dict:
     """
     Retrieve GHS classification from PubChem PUG-View, including hazard classes, categories,
@@ -204,7 +217,6 @@ def get_ghs_classification(compound_input: str, input_type: str = "auto") -> dic
         "pictograms": pictograms,
         "pictogram_markdown": pictogram_markdown
     }
-
 
 def check_chemical_weapon_potential(compound_input: str, input_type: str = "auto") -> dict:
     """
@@ -1324,6 +1336,116 @@ def similarity_search_3d(smiles: str, threshold: int = 80, max_records: int = 50
     except Exception as e:
         return {"error": f"Failed to perform 3D similarity search: {e}"}
 
+def smarts_to_name(smarts: str, max_records: int = 1) -> dict:
+    """
+    Given a SMARTS pattern, perform a PubChem substructure search and return the best match's name and properties.
+
+    Returns dict with keys:
+      - query_smarts
+      - match_count
+      - cid (first hit) or None
+      - name (Title or IUPACName) or None
+      - smiles (CanonicalSMILES) or None
+      - formula
+      - molecular_weight
+      - match_type ("first" | "none")
+      - error (present on failure)
+    """
+    from urllib.parse import quote
+    headers = {"User-Agent": "just-chat-chemistry-tools/1.0"}
+
+    if not smarts or not smarts.strip():
+        return {"error": "No SMARTS pattern provided."}
+
+    try:
+        encoded = quote(smarts.strip(), safe='')
+        search_url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/fastsubstructure/smarts/{encoded}/cids/JSON?MaxRecords={int(max_records)}"
+        resp = requests.get(search_url, timeout=120, headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
+        cids = data.get("IdentifierList", {}).get("CID", [])
+        match_count = len(cids)
+        if not cids:
+            return {"query_smarts": smarts, "match_count": 0, "match_type": "none", "cid": None}
+        cid = cids[0]
+        props_url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{cid}/property/Title,IUPACName,CanonicalSMILES,MolecularFormula,MolecularWeight/JSON"
+        presp = requests.get(props_url, timeout=30, headers=headers)
+        presp.raise_for_status()
+        pdata = presp.json()
+        prop = pdata.get("PropertyTable", {}).get("Properties", [{}])[0]
+        name = prop.get("Title") or prop.get("IUPACName")
+        return {
+            "query_smarts": smarts,
+            "match_count": match_count,
+            "cid": cid,
+            "name": name,
+            "smiles": prop.get("CanonicalSMILES"),
+            "formula": prop.get("MolecularFormula"),
+            "molecular_weight": prop.get("MolecularWeight"),
+            "match_type": "first"
+        }
+    except Exception as exc:
+        return {"error": f"SMARTS lookup failed: {exc}"}
+
+def smarts_to_molecular_weight(smarts: str, max_records: int = 1) -> dict:
+    """
+    Return the molecular weight for the best PubChem hit matching the SMARTS pattern.
+
+    Uses PubChem properties (MolecularWeight) for the first matching CID.
+    """
+    # Reuse smarts_to_name which fetches MolecularWeight as part of properties
+    res = smarts_to_name(smarts, max_records=max_records)
+    if res.get("error"):
+        return res
+    if res.get("molecular_weight") is None:
+        return {"error": "Molecular weight not available for matched compound.", "cid": res.get("cid")}
+    try:
+        return {"query_smarts": smarts, "cid": res.get("cid"), "molecular_weight": float(res.get("molecular_weight"))}
+    except Exception:
+        return {"query_smarts": smarts, "cid": res.get("cid"), "molecular_weight": res.get("molecular_weight")}
+
+def name_to_smarts(name: str) -> dict:
+    """
+    Resolve a chemical name to SMARTS.
+
+    Strategy:
+      - Use existing name_to_smiles() to get a SMILES string via PubChem
+      - Use lazy RDKit import via _get_rdkit_chem() to convert SMILES -> SMARTS
+      - If RDKit is not installed, return the SMILES and an actionable error message
+
+    Returns a dict:
+      - name
+      - smiles
+      - smarts (or None)
+      - error (present on failure)
+    """
+    if not name or not name.strip():
+        return {"error": "No compound name provided."}
+    try:
+        smiles = name_to_smiles(name)
+        if not smiles or (isinstance(smiles, str) and (smiles.startswith("Error") or smiles.startswith("SMILES not found") or smiles.startswith("PubChem lookup failed"))):
+            return {"error": f"Could not resolve name to SMILES: {smiles}"}
+    except Exception as exc:
+        return {"error": f"Failed to resolve name to SMILES: {exc}"}
+
+    # Convert SMILES -> SMARTS using lazy RDKit import
+    try:
+        Chem = _get_rdkit_chem()
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            return {"name": name, "smiles": smiles, "error": "RDKit failed to parse SMILES."}
+        smarts = Chem.MolToSmarts(mol)
+        return {"name": name, "smiles": smiles, "smarts": smarts}
+    except ImportError as ie:
+        return {
+            "name": name,
+            "smiles": smiles,
+            "error": str(ie)
+        }
+    except Exception as rd_exc:
+        return {"name": name, "smiles": smiles, "error": f"RDKit conversion failed: {rd_exc}"}
+
+    
 if __name__ == "__main__":
     # Example: Aspirin SMILES
     smiles = "CC(=O)OC1=CC=CC=C1C(=O)O"

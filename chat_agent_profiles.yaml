@@ -28,6 +28,12 @@ agent_profiles:
         function: "similarity_search_3d"
       - package: "agent_tools.chemistry_tools"
         function: "check_chemical_weapon_potential"
+      - package: "agent_tools.chemistry_tools"
+        function: "smarts_to_name"
+      - package: "agent_tools.chemistry_tools"
+        function: "smarts_to_molecular_weight"
+      - package: "agent_tools.chemistry_tools"
+        function: "name_to_smarts"
     llm_options:
       model: groq/llama-3.3-70b-versatile
       temperature: 0.0
@@ -52,6 +58,12 @@ agent_profiles:
         title: "3D Similarity Search"
       - prompt: "Check whether sarin is listed by PubChem as a chemical warfare agent and summarize the evidence."
         title: "Chemical Weapon Screening"
+      - prompt: Convert the SMARTS string "CC(=O)Oc1ccccc1C(O)=O" to a compound name
+        title: SMARTS to Name Conversion
+      - prompt: What is the SMARTS representation of Aspirin?
+        title: Name to SMARTS Conversion
+      - prompt: Compute the molecular weight for the SMARTS string "CC(=O)Oc1ccccc1C(O)=O"
+        title: Molecular Weight from SMARTS
     system_prompt: |
       You are a Chemistry Assistant specialized in molecular structure analysis and chemical information retrieval.
       
